@@ -9,8 +9,15 @@
   "target_branch": "main",
   "branch": "work/rackmate-fork-audit",
   "worktree": ".",
-  "pr_url": null,
-  "blockers": [],
+  "pr_url": "https://github.com/MrSandman03/Rackula/pull/1",
+  "blockers": [
+    {
+      "kind": "approval",
+      "summary": "Awaiting human approval to merge fork PR #1.",
+      "since": "2026-07-09T08:35:42Z",
+      "step_id": 5
+    }
+  ],
   "steps": {
     "1": {
       "description": "Clean fork and exec truth surfaces",
@@ -54,7 +61,7 @@
     },
     "5": {
       "description": "Run final verification and open fork PR",
-      "status": "verifying",
+      "status": "reviewing",
       "branch": "work/rackmate-fork-audit",
       "worktree_path": ".",
       "retries": 0,
@@ -70,5 +77,5 @@
     "review_threshold": "major"
   },
   "started_at": "2026-07-09T08:04:38Z",
-  "last_updated": "2026-07-09T08:31:00Z"
+  "last_updated": "2026-07-09T08:35:42Z"
 }
