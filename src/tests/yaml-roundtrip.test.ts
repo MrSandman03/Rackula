@@ -14,6 +14,27 @@ import {
 } from "./factories";
 
 describe("YAML layout round-trip", () => {
+  it("preserves an explicit RackMate T1 Plus profile", async () => {
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          width: 10,
+          height: 8,
+          depth_mm: 260,
+          profile: "rackmate-t1-plus",
+        }),
+      ],
+    });
+
+    const yaml = await serializeLayoutToYaml(layout);
+    const restored = await parseLayoutYaml(yaml);
+
+    expect(yaml).toContain("profile: rackmate-t1-plus");
+    expect(restored.racks[0]?.profile).toBe("rackmate-t1-plus");
+    expect(restored.racks[0]?.height).toBe(8);
+    expect(restored.racks[0]?.depth_mm).toBe(260);
+  });
+
   it("preserves rack_widths for 10-inch device compatibility", async () => {
     const tenInchDevice = createTestDeviceType({
       slug: "deskpi-ten-inch-device",

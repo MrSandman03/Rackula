@@ -58,15 +58,43 @@ test.describe("Responsive Layout", () => {
       expect(viewBox.y + viewBox.height).toBeGreaterThan(canvasMidY);
     });
 
+    test("onboarding hint clears the lower-left view controls", async ({
+      page,
+    }) => {
+      const hint = page
+        .locator(locators.canvas.root)
+        .getByRole("status")
+        .filter({ hasText: "Open the Devices tab" });
+      const view = page.getByRole("group", { name: "View actions" });
+      await expect(hint).toBeVisible();
+      await expect(view).toBeVisible();
+
+      const hintBox = await hint.boundingBox();
+      const viewBox = await view.boundingBox();
+      expect(hintBox).not.toBeNull();
+      expect(viewBox).not.toBeNull();
+      if (!hintBox || !viewBox) return;
+
+      const overlaps = !(
+        hintBox.x + hintBox.width <= viewBox.x ||
+        viewBox.x + viewBox.width <= hintBox.x ||
+        hintBox.y + hintBox.height <= viewBox.y ||
+        viewBox.y + viewBox.height <= hintBox.y
+      );
+      expect(overlaps).toBe(false);
+    });
+
     test("history controls clear the placement banner during placement (#2697)", async ({
       page,
     }) => {
       // The placement banner is a full-width top overlay stacked above the
       // controls. The upper-left History group must drop below it so undo/redo
       // stays reachable while a device is armed.
-      const firstDevice = page.locator(locators.device.paletteItem).first();
-      await expect(firstDevice).toBeVisible();
-      await firstDevice.focus();
+      const placeServer = page
+        .getByRole("button", { name: "Place Server", exact: true })
+        .first();
+      await expect(placeServer).toBeVisible();
+      await placeServer.focus();
       await page.keyboard.press("Enter");
 
       const banner = page
@@ -77,16 +105,16 @@ test.describe("Responsive Layout", () => {
       const history = page.getByRole("group", { name: "History actions" });
       await expect(history).toBeVisible();
 
-      const bannerBox = await banner.boundingBox();
-      const historyBox = await history.boundingBox();
-      expect(bannerBox).not.toBeNull();
-      expect(historyBox).not.toBeNull();
-      if (!bannerBox || !historyBox) return;
-
-      // History's top edge sits at or below the banner's bottom edge: no overlap.
-      expect(historyBox.y).toBeGreaterThanOrEqual(
-        bannerBox.y + bannerBox.height,
-      );
+      // History's top edge sits at the banner's bottom edge. Allow one CSS pixel
+      // for fractional layout rounding, and poll until the entry transition settles.
+      await expect
+        .poll(async () => {
+          const bannerBox = await banner.boundingBox();
+          const historyBox = await history.boundingBox();
+          if (!bannerBox || !historyBox) return Number.POSITIVE_INFINITY;
+          return bannerBox.y + bannerBox.height - historyBox.y;
+        })
+        .toBeLessThanOrEqual(1);
     });
 
     test("sidebar pane is visible", async ({ page }) => {

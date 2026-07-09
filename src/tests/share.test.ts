@@ -24,6 +24,7 @@ import {
 } from "./factories";
 import { toInternalUnits } from "$lib/utils/position";
 import type { Layout } from "$lib/types";
+import { findRegisteredBrandDevice } from "$lib/data/brandPacks/registry";
 
 // pako 3.x exports a frozen, read-only ESM namespace, so vi.spyOn cannot
 // redefine its properties. Replace it with a spread copy whose properties are
@@ -115,6 +116,130 @@ describe("toMinimalLayout", () => {
     const minimal = toMinimalLayout(layout);
 
     expect(minimal.rs[0].w).toBe(10);
+  });
+
+  it("round-trips the RackMate T1 Plus profile", () => {
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          width: 10,
+          height: 8,
+          depth_mm: 260,
+          profile: "rackmate-t1-plus",
+          devices: [],
+        }),
+      ],
+    });
+
+    const minimal = toMinimalLayout(layout);
+    const decoded = requireDecoded(requireEncoded(layout));
+
+    expect(minimal.rs[0].pf).toBe("rackmate-t1-plus");
+    expect(decoded.racks[0].profile).toBe("rackmate-t1-plus");
+    expect(decoded.racks[0].height).toBe(8);
+    expect(decoded.racks[0].depth_mm).toBe(260);
+  });
+
+  it("round-trips a generic mini-rack custom depth", () => {
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          width: 10,
+          height: 12,
+          depth_mm: 400,
+          devices: [],
+        }),
+      ],
+    });
+
+    const decoded = requireDecoded(requireEncoded(layout));
+
+    expect(decoded.racks[0].profile).toBeUndefined();
+    expect(decoded.racks[0].height).toBe(12);
+    expect(decoded.racks[0].depth_mm).toBe(400);
+  });
+
+  it("restores built-in fit metadata stripped by the minimal format", () => {
+    const ucgMax = findRegisteredBrandDevice(
+      "ubiquiti-unifi-cloud-gateway-max",
+    )!;
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          width: 10,
+          devices: [createTestDevice({ device_type: ucgMax.slug })],
+        }),
+      ],
+      device_types: [ucgMax],
+    });
+
+    const decoded = requireDecoded(requireEncoded(layout));
+    const restored = decoded.device_types.find(
+      (device) => device.slug === ucgMax.slug,
+    );
+    const fit = restored?.custom_fields?.rackula_fit as
+      | { dimensions_mm?: { width?: number }; open_checks?: string[] }
+      | undefined;
+
+    expect(restored?.rack_widths).toEqual([10, 19]);
+    expect(restored?.is_full_depth).toBe(false);
+    expect(fit?.dimensions_mm?.width).toBe(141.8);
+    expect(fit?.open_checks).toContain("RJ45 cable bend clearance");
+  });
+
+  it("round-trips fit-critical fields for custom devices and carriers", () => {
+    const customCarrier = {
+      ...createTestDeviceType({
+        slug: "custom-carrier",
+        u_height: 1,
+        rack_widths: [10],
+        is_full_depth: false,
+      }),
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+          accepts: ["network" as const],
+        },
+      ],
+      custom_fields: {
+        rackula_fit: {
+          status: "needs_measurement",
+          dimensions_mm: { width: 200, depth: 180, height: 40 },
+          open_checks: ["measure cable clearance"],
+        },
+      },
+    };
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          width: 10,
+          devices: [createTestDevice({ device_type: customCarrier.slug })],
+        }),
+      ],
+      device_types: [customCarrier],
+    });
+
+    const decoded = requireDecoded(requireEncoded(layout));
+    const restored = decoded.device_types.find(
+      (device) => device.slug === customCarrier.slug,
+    );
+    const fit = restored?.custom_fields?.rackula_fit as
+      | {
+          status?: string;
+          dimensions_mm?: { depth?: number };
+          open_checks?: string[];
+        }
+      | undefined;
+
+    expect(restored?.rack_widths).toEqual([10]);
+    expect(restored?.is_full_depth).toBe(false);
+    expect(restored?.slots?.[0]?.accepts).toEqual(["network"]);
+    expect(fit?.status).toBe("needs_measurement");
+    expect(fit?.dimensions_mm?.depth).toBe(180);
+    expect(fit?.open_checks).toEqual(["measure cable clearance"]);
   });
 
   it("normalizes rack width 19 to 19", () => {

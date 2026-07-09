@@ -33,6 +33,7 @@ export function handleNewRack(): void {
     NEW_RACK_DEFAULTS.form_factor,
     NEW_RACK_DEFAULTS.desc_units,
     NEW_RACK_DEFAULTS.starting_unit,
+    NEW_RACK_DEFAULTS.profile,
   );
   if (!rack) return;
   selectionStore.selectRack(rack.id);

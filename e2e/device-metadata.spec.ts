@@ -339,8 +339,16 @@ test.describe("Device Metadata Persistence", () => {
       // Switch back to Devices tab (createRackDirect leaves the sidebar on Racks)
       await page.getByTestId("sidebar-tab-devices").click();
 
-      // Add a device to the second rack (rackIndex 1)
-      await dragDeviceToRack(page, { rackIndex: 1 });
+      // New racks use the explicit 10-inch RackMate profile. Search for a
+      // width-compatible rail device instead of the helper's 19-inch Server
+      // default, then place it in the second rack.
+      await page
+        .getByTestId("search-devices")
+        .fill("RackMate 1U Dual Utility Tray Placeholder");
+      await dragDeviceToRack(page, {
+        rackIndex: 1,
+        deviceName: "RackMate 1U Dual Utility Tray Placeholder",
+      });
 
       // Scope assertions to the second rack container
       const secondRack = rackFronts.nth(1);

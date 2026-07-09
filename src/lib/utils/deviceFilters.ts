@@ -7,8 +7,12 @@ import Fuse from "fuse.js";
 import type { IFuseOptions } from "fuse.js";
 import type { DeviceType, DeviceCategory } from "$lib/types";
 import { DeviceCategorySchema } from "$lib/schemas";
+import {
+  isDeviceCompatibleWithRackWidth,
+  resolveDeviceRackWidths,
+} from "./rack-width";
 
-const DEFAULT_RACK_WIDTHS = [19];
+export { isDeviceCompatibleWithRackWidth } from "./rack-width";
 
 /**
  * Display order for device categories in the palette.
@@ -312,16 +316,6 @@ export function sortDevicesAlphabetically(devices: DeviceType[]): DeviceType[] {
  * @param rackWidth - The rack width in inches (any number, typically 10, 19, 21, or 23)
  * @returns True if the device is compatible with the given rack width
  */
-export function isDeviceCompatibleWithRackWidth(
-  device: DeviceType,
-  rackWidth: number,
-): boolean {
-  const deviceWidths = resolveDeviceRackWidths(device);
-
-  // Device is compatible if rack width >= any of the device's supported widths
-  return deviceWidths.some((deviceWidth) => rackWidth >= deviceWidth);
-}
-
 /**
  * Filter devices by rack width compatibility.
  * Uses "minimum width" logic - see isDeviceCompatibleWithRackWidth for details.
@@ -370,10 +364,6 @@ export function getRackWidthIncompatibilityReason(
   const minRequiredWidth = Math.min(...supportedWidths);
 
   return `Requires at least ${minRequiredWidth}" rack width (current: ${rackWidth}")`;
-}
-
-function resolveDeviceRackWidths(device: DeviceType): number[] {
-  return device.rack_widths?.length ? device.rack_widths : DEFAULT_RACK_WIDTHS;
 }
 
 /**

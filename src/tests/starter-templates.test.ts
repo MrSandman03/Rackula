@@ -122,6 +122,7 @@ describe("loadStarterTemplates", () => {
     expect(layout.name).toBe("RackMate T1 Plus 8U");
     expect(layout.racks[0]?.width).toBe(10);
     expect(layout.racks[0]?.height).toBe(8);
+    expect(layout.racks[0]?.profile).toBe("rackmate-t1-plus");
     expect(layout.racks[0]?.devices.length ?? 0).toBeGreaterThan(0);
     expect(layout.racks[0]?.devices.some((d) => d.auto_created)).toBe(false);
     expect(

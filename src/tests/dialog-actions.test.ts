@@ -121,6 +121,7 @@ describe("handleNewRack", () => {
     expect(created).toBeDefined();
     expect(created?.width).toBe(10);
     expect(created?.depth_mm).toBe(260);
+    expect(created?.profile).toBe("rackmate-t1-plus");
     expect(created?.desc_units).toBe(false);
   });
 

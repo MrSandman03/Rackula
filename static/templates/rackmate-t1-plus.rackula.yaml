@@ -10,6 +10,7 @@ racks:
     name: "RackMate T1 Plus"
     height: 8
     width: 10
+    profile: "rackmate-t1-plus"
     depth_mm: 260
     desc_units: false
     show_rear: true

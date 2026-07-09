@@ -860,6 +860,70 @@ describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => 
     }
   });
 
+  it("rejects a physically too-tall full-width child in a 0.5U slot", () => {
+    const carrier = {
+      slug: "half-u-full-width-tray",
+      model: "Half-U Full-Width Tray",
+      u_height: 1,
+      category: "shelf",
+      colour: "#888888",
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 0.5,
+          accepts: ["network"],
+        },
+      ],
+    };
+    const tallChild = {
+      slug: "tall-half-u-child",
+      model: "Tall Half-U Child",
+      u_height: 0.5,
+      slot_width: 2,
+      rack_widths: [10],
+      is_full_depth: false,
+      category: "network",
+      colour: "#4A90D9",
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 100, depth: 100, height: 30 },
+        },
+      },
+    };
+    const layout = layoutWith(
+      [carrier, tallChild],
+      [
+        {
+          id: "carrier-1",
+          device_type: carrier.slug,
+          position: 30,
+          face: "front" as const,
+        },
+        {
+          id: "child-1",
+          device_type: tallChild.slug,
+          position: 0,
+          face: "front" as const,
+          container_id: "carrier-1",
+          slot_id: "main",
+        },
+      ],
+      10,
+    );
+
+    const result = LayoutSchema.safeParse(layout);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((issue) =>
+          /taller than slot/i.test(issue.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
   it("rejects a child position that extends outside the selected slot", () => {
     const carrier = {
       slug: "one-slot-carrier",
@@ -915,6 +979,55 @@ describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => 
     }
   });
 
+  it("accepts a 19-inch child in a wider rack using minimum-width semantics", () => {
+    const carrier = {
+      slug: "wide-rack-carrier",
+      model: "Wide Rack Carrier",
+      u_height: 1,
+      category: "shelf",
+      colour: "#888888",
+      rack_widths: [19],
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+      ],
+    };
+    const child = {
+      slug: "nineteen-inch-child",
+      model: "19-inch Child",
+      u_height: 1,
+      category: "network",
+      colour: "#4A90D9",
+      rack_widths: [19],
+    };
+    const layout = layoutWith(
+      [carrier, child],
+      [
+        {
+          id: "carrier-1",
+          device_type: carrier.slug,
+          position: 30,
+          face: "front" as const,
+        },
+        {
+          id: "child-1",
+          device_type: child.slug,
+          position: 0,
+          face: "front" as const,
+          container_id: "carrier-1",
+          slot_id: "main",
+        },
+      ],
+      21,
+    );
+
+    expect(LayoutSchema.safeParse(layout).success).toBe(true);
+  });
+
   it("enforces carrier-first rules for built-in brand types not embedded in the layout", () => {
     const layout = layoutWith(
       [],
@@ -922,6 +1035,122 @@ describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => 
         {
           id: "tiny-1",
           device_type: "lenovo-thinkcentre-m720q-tiny",
+          position: 30,
+          face: "front" as const,
+        },
+      ],
+      10,
+    );
+
+    const result = LayoutSchema.safeParse(layout);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) =>
+          /cannot mount directly/i.test(i.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("hydrates fit-critical fields when an embedded built-in type is stripped", () => {
+    const dualCarrier = {
+      slug: "rackmate-dual-tray",
+      model: "RackMate Dual Tray",
+      u_height: 1,
+      category: "shelf",
+      colour: "#888888",
+      slots: [
+        {
+          id: "left",
+          position: { row: 0, col: 0 },
+          width_fraction: 0.5,
+          height_units: 0.5,
+          accepts: ["network"],
+        },
+        {
+          id: "right",
+          position: { row: 0, col: 1 },
+          width_fraction: 0.5,
+          height_units: 0.5,
+          accepts: ["network"],
+        },
+      ],
+    };
+    const strippedUcgMax = {
+      slug: "ubiquiti-unifi-cloud-gateway-max",
+      model: "UCG-Max",
+      u_height: 0.5,
+      slot_width: 1 as const,
+      subdevice_role: "child" as const,
+      category: "network",
+      colour: "#4A90D9",
+    };
+    const layout = layoutWith(
+      [dualCarrier, strippedUcgMax],
+      [
+        {
+          id: "carrier-1",
+          device_type: "rackmate-dual-tray",
+          position: 30,
+          face: "front" as const,
+        },
+        {
+          id: "ucg-1",
+          device_type: strippedUcgMax.slug,
+          position: 0,
+          face: "front" as const,
+          container_id: "carrier-1",
+          slot_id: "left",
+        },
+      ],
+      10,
+    );
+
+    const result = LayoutSchema.safeParse(layout);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some(
+          (issue) =>
+            /wider than slot/i.test(issue.message) ||
+            /taller than slot/i.test(issue.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("returns hydrated built-in types from parsed layouts", () => {
+    const strippedUcgMax = {
+      slug: "ubiquiti-unifi-cloud-gateway-max",
+      model: "UCG-Max",
+      u_height: 0.5,
+      slot_width: 1 as const,
+      subdevice_role: "child" as const,
+      category: "network",
+      colour: "#4A90D9",
+    };
+    const layout = layoutWith([strippedUcgMax], [], 10);
+
+    const parsed = LayoutSchema.parse(layout);
+    const restored = parsed.device_types.find(
+      (device) => device.slug === strippedUcgMax.slug,
+    );
+    const fit = restored?.custom_fields?.rackula_fit as
+      { dimensions_mm?: { width?: number } } | undefined;
+
+    expect(restored?.rack_widths).toEqual([10, 19]);
+    expect(restored?.is_full_depth).toBe(false);
+    expect(fit?.dimensions_mm?.width).toBe(141.8);
+  });
+
+  it("enforces carrier-first rules for omitted built-ins from every brand pack", () => {
+    const layout = layoutWith(
+      [],
+      [
+        {
+          id: "pi-1",
+          device_type: "raspberry-pi-5",
           position: 30,
           face: "front" as const,
         },

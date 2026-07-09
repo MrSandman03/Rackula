@@ -5,7 +5,7 @@
  * duplication, reordering, and raw mutators for undo/redo.
  */
 
-import type { FormFactor, Rack, RackGroup } from "$lib/types";
+import type { FormFactor, Rack, RackGroup, RackProfile } from "$lib/types";
 import { MAX_RACKS } from "$lib/types/constants";
 import { createDefaultRack } from "$lib/utils/serialization";
 import { layoutDebug } from "$lib/utils/debug";
@@ -23,6 +23,7 @@ import type { LayoutStateAccess } from "./types";
 import { getRackGroupCommandAdapter, getRackGroupForRack } from "./rack-groups";
 import { setLayoutNamesRaw } from "./mutators";
 import { reorderRackRow } from "$lib/utils/rack-row";
+import { constrainRackProfileUpdates } from "$lib/utils/rack-profile";
 
 /** Recorded single-rack update action injected by the facade. */
 export type UpdateRackRecordedFn = (
@@ -293,6 +294,7 @@ export function addRack(
   form_factor?: FormFactor,
   desc_units?: boolean,
   starting_unit?: number,
+  profile?: RackProfile,
 ): (Rack & { id: string }) | null {
   const layout = ctx.getLayout();
 
@@ -323,6 +325,7 @@ export function addRack(
     starting_unit ?? 1,
     true, // show_rear
     generateRackId(), // id - pass directly
+    profile,
   );
 
   // Use recorded action for undo/redo support
@@ -608,9 +611,11 @@ export function updateRack(
 ): void {
   const rackIndex = ctx.findRackIndex(id);
   if (rackIndex === -1) return;
+  const rack = ctx.getLayout().racks[rackIndex]!;
+  const constrainedUpdates = constrainRackProfileUpdates(rack, updates);
 
   // Check if height change on bayed rack
-  if (updates.height !== undefined) {
+  if (constrainedUpdates.height !== undefined) {
     const group = getRackGroupForRack(ctx, id);
     if (group?.layout_preset === "bayed") {
       layoutDebug.state(
@@ -623,19 +628,23 @@ export function updateRack(
   }
 
   // Handle view separately (doesn't need undo/redo)
-  if (updates.view !== undefined) {
+  if (constrainedUpdates.view !== undefined) {
     const layout = ctx.getLayout();
     ctx.setLayout({
       ...layout,
       racks: layout.racks.map((r, i) =>
-        i === rackIndex ? { ...r, view: updates.view } : r,
+        i === rackIndex ? { ...r, view: constrainedUpdates.view } : r,
       ),
     });
     ctx.markDirty();
   }
 
   // For other properties, use recorded version for undo/redo support
-  const { view: _view, devices: _devices, ...recordableUpdates } = updates;
+  const {
+    view: _view,
+    devices: _devices,
+    ...recordableUpdates
+  } = constrainedUpdates;
   if (Object.keys(recordableUpdates).length === 0) return;
 
   // BayedRackView renders one shared U-label column read from racks[0], so

@@ -20,7 +20,7 @@ import {
 } from "$lib/utils/collision";
 import { createTestDeviceType } from "./factories";
 import { CATEGORY_COLOURS } from "$lib/types/constants";
-import type { PlacedDevice } from "$lib/types";
+import type { DeviceType, PlacedDevice } from "$lib/types";
 
 beforeEach(() => {
   resetLayoutStore();
@@ -247,5 +247,33 @@ describe("placeDeviceSmart (store carrier-first flow)", () => {
 
     expect(store.placeDeviceSmart(rackId, dt.slug, 5)).toBe(false);
     expect(carrierIn(store)).toBeUndefined();
+  });
+
+  it("rejects a synthesized carrier assembly deeper than the rack", () => {
+    const { store, rackId } = setupRack();
+    store.updateRack(rackId, { depth_mm: 260 });
+    const deepChild: DeviceType = {
+      ...createTestDeviceType({
+        slug: "deep-half-width",
+        u_height: 0.5,
+        slot_width: 1,
+        rack_widths: [19],
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 100, depth: 300, height: 20 },
+        },
+      },
+    };
+    store.addDeviceTypeRaw(deepChild);
+
+    expect(store.placeDeviceSmart(rackId, deepChild.slug, 5)).toBe(false);
+    expect(carrierIn(store)).toBeUndefined();
+    expect(
+      store.rack!.devices.find(
+        (device) => device.device_type === deepChild.slug,
+      ),
+    ).toBeUndefined();
   });
 });

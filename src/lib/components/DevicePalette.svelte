@@ -55,9 +55,8 @@
 
   let { ondeviceselect, oncreatedevice }: Props = $props();
 
-  // Estimated palette row height in pixels, used by the virtualized lists.
-  // Rows are a flex line with var(--touch-target-min) min-height (48px) plus
-  // vertical padding; 48 keeps the windowing math close enough for overscan.
+  // Fixed palette row height in pixels, shared with DevicePaletteItem's
+  // --touch-target-min block size. VirtualList requires exact row geometry.
   const ROW_HEIGHT = 48;
   // Below this row count a section renders as plain DOM so the accordion's
   // height animation and the generic section's category sub-grouping stay
@@ -346,6 +345,7 @@
         device,
         activeRackWidth,
         allPaletteDevices,
+        layoutStore.activeRack?.profile,
       );
     }
 
@@ -553,6 +553,7 @@
   });
 
   function handleDeviceSelect(event: CustomEvent<{ device: DeviceType }>) {
+    if (!isCompatible(event.detail.device)) return;
     ondeviceselect?.(event);
   }
 

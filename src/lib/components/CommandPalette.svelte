@@ -41,6 +41,10 @@
   import { getStarterLibrary, getStarterSlugs } from "$lib/data/starterLibrary";
   import { getBrandPacks, getBrandSlugs } from "$lib/data/brandPacks";
   import { getRackFitSummary } from "$lib/utils/rack-fit";
+  import {
+    getRackWidthIncompatibilityReason,
+    isDeviceCompatibleWithRackWidth,
+  } from "$lib/utils/deviceFilters";
   import type { ActionId, ActionEnabledContext } from "$lib/actions/registry";
   import type { DeviceType } from "$lib/types";
 
@@ -146,7 +150,20 @@
   }
 
   function deviceFitSummary(device: DeviceType) {
-    return getRackFitSummary(device, activeRackWidth, commandDeviceLibrary);
+    return getRackFitSummary(
+      device,
+      activeRackWidth,
+      commandDeviceLibrary,
+      layoutStore.activeRack?.profile,
+    );
+  }
+
+  function deviceIsCompatible(device: DeviceType): boolean {
+    return isDeviceCompatibleWithRackWidth(device, activeRackWidth);
+  }
+
+  function deviceIncompatibilityReason(device: DeviceType): string | null {
+    return getRackWidthIncompatibilityReason(device, activeRackWidth);
   }
 
   function resetState() {
@@ -226,7 +243,7 @@
 
   function placeDevice(device: DeviceType) {
     // Tap-to-place is suppressed when the layout is locked for viewing.
-    if (uiStore.readOnly) return;
+    if (uiStore.readOnly || !deviceIsCompatible(device)) return;
     // Mirror the mobile tap-to-place path: start placement, then close. The
     // palette closing is the cue to position the device on the canvas.
     placementStore.startPlacement(device);
@@ -329,7 +346,7 @@
 
         <Command.List
           class="command-list {browsing ? 'command-list--browsing' : ''}"
-          aria-label="Commands"
+          aria-label={mode === "devices" ? "Devices" : "Commands"}
         >
           <Command.Viewport class="command-viewport">
             {#if mode !== "devices" && !canAddDevice}
@@ -359,19 +376,32 @@
                   </Command.GroupHeading>
                   <Command.GroupItems>
                     {#each deviceResults as device (device.slug)}
+                      {@const compatible = deviceIsCompatible(device)}
+                      {@const incompatibilityReason =
+                        deviceIncompatibilityReason(device)}
+                      {@const fitSummary = deviceFitSummary(device)}
                       <Command.Item
                         value={device.slug}
+                        disabled={!compatible}
                         onSelect={() => placeDevice(device)}
                         class="command-item"
                         data-testid={`command-palette-device-item-${device.slug}`}
+                        aria-label={compatible
+                          ? deviceLabel(device)
+                          : `${deviceLabel(device)}. ${incompatibilityReason}`}
                       >
-                        {@const fitSummary = deviceFitSummary(device)}
                         <span class="command-item-label"
                           >{deviceLabel(device)}</span
                         >
                         <span class="command-item-shortcut command-device-meta">
                           <span>{device.u_height}U</span>
-                          {#if fitSummary}
+                          {#if !compatible}
+                            <span
+                              class="command-item-reason"
+                              title={incompatibilityReason ?? undefined}
+                              >Width</span
+                            >
+                          {:else if fitSummary}
                             <span
                               class="command-fit-badge command-fit-badge--{fitSummary.tone}"
                               title={fitSummary.title}

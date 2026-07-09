@@ -12,7 +12,7 @@ import { openDeviceLibraryFromBottomNav } from "./helpers/mobile-navigation";
 import {
   EMPTY_RACK_SHARE,
   dragDeviceToRack,
-  paletteItemByName,
+  paletteSelectButtonByName,
   locators,
 } from "./helpers";
 
@@ -234,7 +234,7 @@ test.describe("Tap-to-place on touch (#2454)", () => {
     // Arm placement: tap a placeable full-width Server. This closes the bottom
     // sheet and surfaces the "Placing:" banner. Do NOT press Escape, it cancels.
     await openDeviceLibraryFromBottomNav(page);
-    const serverDevice = paletteItemByName(page, "Server").first();
+    const serverDevice = paletteSelectButtonByName(page, "Server").first();
     await expect(serverDevice).toBeVisible();
     await serverDevice.tap();
 
@@ -273,7 +273,7 @@ test.describe("Tap-to-place on touch (#2454)", () => {
     const devicesBefore = await page.locator(locators.rack.device).count();
 
     await openDeviceLibraryFromBottomNav(page);
-    const serverDevice = paletteItemByName(page, "Server").first();
+    const serverDevice = paletteSelectButtonByName(page, "Server").first();
     await expect(serverDevice).toBeVisible();
     await serverDevice.tap();
 

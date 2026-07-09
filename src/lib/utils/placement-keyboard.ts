@@ -46,6 +46,7 @@ export function validStartPositions(
         startU,
         undefined,
         face,
+        device,
       ) === "valid"
     ) {
       positions.push(startU);

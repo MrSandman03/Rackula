@@ -115,6 +115,8 @@ export const MinimalSlotSchema = z.object({
   wf: z.number().optional(),
   /** height units (optional) */
   hu: z.number().optional(),
+  /** accepted device category abbreviations (optional) */
+  a: z.array(z.string().length(1)).optional(),
 });
 
 /**
@@ -144,6 +146,16 @@ export const MinimalDeviceTypeSchema = z.object({
   sw: z.union([z.literal(1), z.literal(2)]).optional(),
   /** subdevice_role */
   sr: z.enum(["parent", "child"]).optional(),
+  /** compatible rack widths */
+  rw: z
+    .array(
+      z.union([z.literal(10), z.literal(19), z.literal(21), z.literal(23)]),
+    )
+    .optional(),
+  /** full-depth collision behavior */
+  fd: z.boolean().optional(),
+  /** fit metadata needed for physical placement checks */
+  rf: z.record(z.string(), z.any()).optional(),
 });
 
 /**
@@ -156,6 +168,10 @@ export const MinimalRackSchema = z.object({
   h: z.number().int().min(1).max(100),
   /** width (normalized to 10 or 19 for share links) */
   w: z.union([z.literal(10), z.literal(19)]),
+  /** named physical rack profile */
+  pf: z.literal("rackmate-t1-plus").optional(),
+  /** rack depth in millimetres */
+  dp: z.number().positive().finite().optional(),
   /** devices */
   d: z.array(MinimalDeviceSchema),
 });

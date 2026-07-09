@@ -21,18 +21,16 @@ import {
 import { withRackProfileDefaults } from "$lib/utils/rack-profile";
 import {
   effectiveSlotHeightUnits,
+  getDeviceDimensionsMm,
   getSlotFitIssues,
+  SLOT_DIMENSION_TOLERANCE_MM,
   validateSlotTopology,
 } from "$lib/utils/slot-fit";
-import { findStarterDevice } from "$lib/data/starterLibrary";
-import { deskpiDevices } from "$lib/data/brandPacks/deskpi";
-import { ecoflowDevices } from "$lib/data/brandPacks/ecoflow";
-import { guitkDevices } from "$lib/data/brandPacks/guitk";
-import { lenovoDevices } from "$lib/data/brandPacks/lenovo";
-import { minisforumDevices } from "$lib/data/brandPacks/minisforum";
-import { netgearDevices } from "$lib/data/brandPacks/netgear";
-import { pecronDevices } from "$lib/data/brandPacks/pecron";
-import { ubiquitiDevices } from "$lib/data/brandPacks/ubiquiti";
+import {
+  findBuiltInDeviceType,
+  hydrateBuiltInDeviceType,
+} from "$lib/utils/built-in-device";
+import { isDeviceCompatibleWithRackWidth } from "$lib/utils/rack-width";
 
 // Re-export the version-migration cluster so consumers importing from
 // "$lib/schemas" keep their import paths unchanged (the cluster moved to
@@ -48,24 +46,6 @@ const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  * Hex colour pattern: 6-character hex with # prefix
  */
 const HEX_COLOUR_PATTERN = /^#[0-9a-fA-F]{6}$/;
-
-const SCHEMA_SAFE_BRAND_DEVICES = [
-  ...deskpiDevices,
-  ...ecoflowDevices,
-  ...guitkDevices,
-  ...lenovoDevices,
-  ...minisforumDevices,
-  ...netgearDevices,
-  ...pecronDevices,
-  ...ubiquitiDevices,
-];
-
-function findBuiltInDeviceTypeForSchema(slug: string) {
-  return (
-    findStarterDevice(slug) ??
-    SCHEMA_SAFE_BRAND_DEVICES.find((device) => device.slug === slug)
-  );
-}
 
 // ============================================================================
 // Basic Schemas
@@ -574,7 +554,7 @@ export const DeviceTypeSchema = z
   .passthrough()
   .superRefine((data, ctx) => {
     if (data.slots && data.slots.length > 0) {
-      for (const issue of validateSlotTopology(data.slots)) {
+      for (const issue of validateSlotTopology(data.slots, data.u_height)) {
         const slotIndex =
           issue.slotId !== undefined
             ? data.slots.findIndex((slot) => slot.id === issue.slotId)
@@ -712,6 +692,7 @@ const RackSchemaInput = z
       z.literal(21),
       z.literal(23),
     ]),
+    profile: z.literal("rackmate-t1-plus").optional(),
     desc_units: z.boolean(),
     show_rear: z.boolean().default(true),
     form_factor: FormFactorSchema,
@@ -750,6 +731,7 @@ export const RackSchema = z
       z.literal(21),
       z.literal(23),
     ]),
+    profile: z.literal("rackmate-t1-plus").optional(),
     desc_units: z.boolean(),
     show_rear: z.boolean().default(true),
     form_factor: FormFactorSchema,
@@ -881,6 +863,26 @@ export const LayoutSchemaBase = LayoutSchemaInput.transform((data) => {
     racks = [];
   }
 
+  // Compact/share payloads may omit built-ins entirely or embed only their
+  // display fields. Restore canonical fit constraints before migration and
+  // return the hydrated definitions so every downstream consumer sees the
+  // same validation-critical data.
+  const deviceTypes = data.device_types.map((deviceType) =>
+    hydrateBuiltInDeviceType(deviceType),
+  );
+  const knownDeviceTypes = new Set(
+    deviceTypes.map((deviceType) => deviceType.slug),
+  );
+  for (const rack of racks) {
+    for (const device of rack.devices) {
+      if (knownDeviceTypes.has(device.device_type)) continue;
+      const builtIn = findBuiltInDeviceType(device.device_type);
+      if (!builtIn) continue;
+      deviceTypes.push(builtIn);
+      knownDeviceTypes.add(builtIn.slug);
+    }
+  }
+
   // Collect all devices across all racks for heuristic check
   const allDevices = racks.flatMap((r) => r.devices);
 
@@ -889,9 +891,7 @@ export const LayoutSchemaBase = LayoutSchemaInput.transform((data) => {
 
   // Resolve device-type u_height for the over-rack clamp (#2661). Built once per
   // load; an unknown slug falls back to 1U inside clampOverRackPositions.
-  const uHeightBySlug = new Map(
-    data.device_types.map((t) => [t.slug, t.u_height]),
-  );
+  const uHeightBySlug = new Map(deviceTypes.map((t) => [t.slug, t.u_height]));
 
   // Generate IDs for racks missing them, deduplicate device IDs, and migrate positions if needed.
   const racksWithIds = racks.map((rack) => {
@@ -921,17 +921,29 @@ export const LayoutSchemaBase = LayoutSchemaInput.transform((data) => {
       ? migrateDevicePositions(deduplicatedDevices)
       : deduplicatedDevices;
 
-    return withRackProfileDefaults({
+    const rackWithProfileDefaults = withRackProfileDefaults({
       ...rack,
       id: rack.id ?? nanoid(),
+    });
+    const profileReducedHeight =
+      rack.profile === "rackmate-t1-plus" &&
+      rack.height !== rackWithProfileDefaults.height;
+
+    return {
+      ...rackWithProfileDefaults,
       // Positions are in internal units here; clamp any rail device whose top
       // extends above the rack down to the highest within-rack whole-U (#2661).
-      devices: clampOverRackPositions(
-        migratedDevices,
-        rack.height,
-        uHeightBySlug,
-      ),
-    });
+      // A named profile that reduces the declared height is stricter: preserve
+      // the original positions so refinement rejects incompatible contents
+      // instead of silently stacking them at the new top U.
+      devices: profileReducedHeight
+        ? migratedDevices
+        : clampOverRackPositions(
+            migratedDevices,
+            rackWithProfileDefaults.height,
+            uHeightBySlug,
+          ),
+    };
   });
 
   // Build the output without the legacy 'rack' field
@@ -944,7 +956,7 @@ export const LayoutSchemaBase = LayoutSchemaInput.transform((data) => {
     // After migration, stamp with current app version
     version: migratePositions ? VERSION : data.version,
     racks: racksWithIds,
-    device_types: data.device_types,
+    device_types: deviceTypes,
   };
 });
 
@@ -1035,8 +1047,12 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
   const deviceTypeBySlug = new Map(
     data.device_types.map((dt) => [dt.slug, dt]),
   );
-  const resolveDeviceType = (slug: string) =>
-    deviceTypeBySlug.get(slug) ?? findBuiltInDeviceTypeForSchema(slug);
+  const resolveDeviceType = (slug: string) => {
+    const embedded = deviceTypeBySlug.get(slug);
+    return embedded
+      ? hydrateBuiltInDeviceType(embedded)
+      : findBuiltInDeviceType(slug);
+  };
 
   // Check each rack's devices for container relationships
   for (let rackIndex = 0; rackIndex < data.racks.length; rackIndex++) {
@@ -1145,9 +1161,18 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
         const slot = slotById.get(device.slot_id)!;
         const childForFit = resolveDeviceType(device.device_type);
         if (childForFit) {
+          if (!isDeviceCompatibleWithRackWidth(childForFit, rack.width)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Device "${device.name ?? device.id}" is not compatible with a ${rack.width}-inch rack.`,
+              path: ["racks", rackIndex, "devices", deviceIndex, "device_type"],
+            });
+          }
+
           for (const issue of getSlotFitIssues(childForFit, slot, {
             rackWidth: rack.width,
             containerHeightUnits: containerType.u_height,
+            containerSlots: containerType.slots,
           })) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
@@ -1158,6 +1183,7 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
 
           const slotHeight = effectiveSlotHeightUnits(slot, {
             containerHeightUnits: containerType.u_height,
+            containerSlots: containerType.slots,
           });
           if (device.position + childForFit.u_height > slotHeight) {
             ctx.addIssue({
@@ -1176,6 +1202,96 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
           code: z.ZodIssueCode.custom,
           message: `Device "${device.name ?? device.id}" is a container (has slots) but is placed inside another container. Single-level nesting only.`,
           path: ["racks", rackIndex, "devices", deviceIndex, "device_type"],
+        });
+      }
+    }
+
+    if (rack.profile === "rackmate-t1-plus") {
+      const invalidDeviceIndexes = new Set<number>();
+      const assemblyDepth = (
+        device: (typeof rack.devices)[number],
+        visited = new Set<string>(),
+      ): number | undefined => {
+        if (visited.has(device.id)) return undefined;
+        visited.add(device.id);
+        const type = resolveDeviceType(device.device_type);
+        let depth = type ? getDeviceDimensionsMm(type)?.depth : undefined;
+        for (const child of rack.devices) {
+          if (child.container_id !== device.id) continue;
+          const childDepth = assemblyDepth(child, visited);
+          if (childDepth !== undefined) {
+            depth =
+              depth === undefined ? childDepth : Math.max(depth, childDepth);
+          }
+        }
+        return depth;
+      };
+      const rootDevices = rack.devices
+        .map((device, index) => ({ device, index }))
+        .filter(({ device }) => !device.container_id);
+      const maxRackTop = rack.height * UNITS_PER_U + (UNITS_PER_U - 1);
+
+      for (const { device, index } of rootDevices) {
+        const type = resolveDeviceType(device.device_type);
+        if (!type) continue;
+        const dimensions = getDeviceDimensionsMm(type);
+        const top =
+          device.position + Math.round(type.u_height * UNITS_PER_U) - 1;
+        const depth = assemblyDepth(device);
+        if (
+          !isDeviceCompatibleWithRackWidth(type, rack.width) ||
+          (dimensions?.width !== undefined &&
+            dimensions.width >
+              rack.width * 25.4 + SLOT_DIMENSION_TOLERANCE_MM) ||
+          top > maxRackTop ||
+          (depth !== undefined &&
+            rack.depth_mm !== undefined &&
+            depth > rack.depth_mm)
+        ) {
+          invalidDeviceIndexes.add(index);
+        }
+      }
+
+      for (let left = 0; left < rootDevices.length; left++) {
+        const a = rootDevices[left]!;
+        const typeA = resolveDeviceType(a.device.device_type);
+        if (!typeA) continue;
+        const bottomA = a.device.position;
+        const topA = bottomA + Math.round(typeA.u_height * UNITS_PER_U) - 1;
+        const faceA = typeA.is_full_depth !== false ? "both" : a.device.face;
+
+        for (let right = left + 1; right < rootDevices.length; right++) {
+          const b = rootDevices[right]!;
+          const typeB = resolveDeviceType(b.device.device_type);
+          if (!typeB) continue;
+          const bottomB = b.device.position;
+          const topB = bottomB + Math.round(typeB.u_height * UNITS_PER_U) - 1;
+          if (bottomA > topB || bottomB > topA) continue;
+
+          const faceB = typeB.is_full_depth !== false ? "both" : b.device.face;
+          const facesCollide =
+            faceA === "both" || faceB === "both" || faceA === faceB;
+          const depthA = assemblyDepth(a.device);
+          const depthB = assemblyDepth(b.device);
+          const depthsCollide =
+            !facesCollide &&
+            depthA !== undefined &&
+            depthB !== undefined &&
+            rack.depth_mm !== undefined &&
+            depthA + depthB > rack.depth_mm;
+          if (facesCollide || depthsCollide) {
+            invalidDeviceIndexes.add(a.index);
+            invalidDeviceIndexes.add(b.index);
+          }
+        }
+      }
+
+      for (const deviceIndex of invalidDeviceIndexes) {
+        const device = rack.devices[deviceIndex]!;
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Device "${device.name ?? device.id}" does not fit the RackMate T1 Plus profile at its saved position.`,
+          path: ["racks", rackIndex, "devices", deviceIndex],
         });
       }
     }

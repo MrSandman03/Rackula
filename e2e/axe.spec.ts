@@ -189,7 +189,7 @@ test.describe("axe accessibility scans - mobile viewport", () => {
     await expect(
       page.locator(locators.device.paletteItem).first(),
     ).toBeVisible();
-    await page.locator(locators.device.paletteItem).first().click();
+    await page.getByTestId("device-palette-select").first().click();
 
     // Wait for the sheet to close and the banner to appear.
     await expect(

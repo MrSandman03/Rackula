@@ -1690,6 +1690,35 @@ describe("DeviceTypeSchema container support", () => {
     const result = DeviceTypeSchema.safeParse(type);
     expect(result.success).toBe(true);
   });
+
+  it("rejects slot rows taller than their container", () => {
+    const type = {
+      ...createTestDeviceType({ slug: "overflowing-carrier", u_height: 1 }),
+      slots: [
+        createTestSlot({
+          id: "bottom",
+          position: { row: 0, col: 0 },
+          height_units: 1,
+        }),
+        createTestSlot({
+          id: "top",
+          position: { row: 1, col: 0 },
+          height_units: 1,
+        }),
+      ],
+    };
+
+    const result = DeviceTypeSchema.safeParse(type);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((issue) =>
+          /exceeding the container height/i.test(issue.message),
+        ),
+      ).toBe(true);
+    }
+  });
 });
 
 describe("PlacedDeviceSchema container child support", () => {

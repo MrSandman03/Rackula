@@ -15,6 +15,7 @@ import {
   canPlaceDevice,
   canPlaceInContainer,
   canPlaceInSlot,
+  getPlacedAssemblyDepthMm,
   findValidDropPositions,
   findNextFreeChildPosition,
   findNextSlotForChild,
@@ -23,9 +24,14 @@ import {
 } from "$lib/utils/collision";
 import { findDeviceType as findDeviceTypeInArray } from "$lib/stores/layout-helpers";
 import { findDeviceType } from "$lib/utils/device-lookup";
+import { isDeviceCompatibleWithRackWidth } from "$lib/utils/deviceFilters";
 import { generateId } from "$lib/utils/device";
 import { toInternalUnits } from "$lib/utils/position";
 import { instantiatePorts } from "$lib/utils/port-utils";
+import {
+  effectiveSlotHeightUnits,
+  getDeviceDepthMm,
+} from "$lib/utils/slot-fit";
 import {
   createPlaceDeviceCommand,
   createAddDeviceTypeCommand,
@@ -345,6 +351,9 @@ export function placeDeviceSmart(
   const layout = ctx.getLayout();
   const deviceType = findDeviceType(deviceTypeSlug, layout.device_types);
   if (!deviceType) return false;
+  if (!isDeviceCompatibleWithRackWidth(deviceType, targetRack.width)) {
+    return false;
+  }
 
   const carrierSlug = synthesizeCarrierForDevice(deviceType, targetRack.width);
 
@@ -372,6 +381,7 @@ export function placeDeviceSmart(
       canPlaceInSlot(deviceType, slot, {
         rackWidth: targetRack.width,
         containerHeightUnits: carrierType.u_height,
+        containerSlots: carrierType.slots,
       }),
     );
     if (fittingSlots.length === 0) return false;
@@ -396,6 +406,14 @@ export function placeDeviceSmart(
   // Synthesise a new carrier and place the child inside it.
   const carrierType = findDeviceType(carrierSlug, layout.device_types);
   if (!carrierType) return false;
+  const carrierDepth = getDeviceDepthMm(carrierType);
+  const childDepth = getDeviceDepthMm(deviceType);
+  const assemblyDepth =
+    carrierDepth === undefined
+      ? childDepth
+      : childDepth === undefined
+        ? carrierDepth
+        : Math.max(carrierDepth, childDepth);
 
   // Carriers are whole-U full-width: validate the rail slot is free.
   if (
@@ -408,6 +426,7 @@ export function placeDeviceSmart(
       "both",
       undefined,
       carrierType,
+      assemblyDepth,
     )
   ) {
     return false;
@@ -420,6 +439,7 @@ export function placeDeviceSmart(
     canPlaceInSlot(deviceType, slot, {
       rackWidth: targetRack.width,
       containerHeightUnits: carrierType.u_height,
+      containerSlots: carrierType.slots,
     }),
   );
   const free = findNextFreeChildPosition(
@@ -528,6 +548,54 @@ export function moveDeviceToRack(
     (deviceType.is_full_depth !== false ? "both" : (device.face ?? "front"));
   const positionInternal = toInternalUnits(newPosition);
 
+  // A container moves with its children, so validate the deepest source
+  // assembly against the destination rather than only the parent shell.
+  const children = sourceRack.devices.filter(
+    (child) => child.container_id === device.id,
+  );
+  const assemblyDepthMm = getPlacedAssemblyDepthMm(
+    sourceRack,
+    layout.device_types,
+    device,
+  );
+
+  for (const child of children) {
+    const childType = findDeviceType(child.device_type, layout.device_types);
+    if (!childType) return false;
+    if (!isDeviceCompatibleWithRackWidth(childType, targetRack.width)) {
+      return false;
+    }
+
+    const declaredSlot = child.slot_id
+      ? deviceType.slots?.find((slot) => slot.id === child.slot_id)
+      : undefined;
+    const destinationSlot = declaredSlot ?? {
+      id: "assembly-width",
+      position: { row: 0, col: 0 },
+      width_fraction: 1,
+      height_units: deviceType.u_height,
+    };
+    if (
+      !canPlaceInSlot(childType, destinationSlot, {
+        rackWidth: targetRack.width,
+        containerHeightUnits: deviceType.u_height,
+        containerSlots: deviceType.slots,
+      })
+    ) {
+      return false;
+    }
+    if (
+      declaredSlot &&
+      child.position + childType.u_height >
+        effectiveSlotHeightUnits(declaredSlot, {
+          containerHeightUnits: deviceType.u_height,
+          containerSlots: deviceType.slots,
+        })
+    ) {
+      return false;
+    }
+  }
+
   // Validate placement in target rack (no excludeIndex — device isn't in target rack yet)
   if (
     !canPlaceDevice(
@@ -539,15 +607,12 @@ export function moveDeviceToRack(
       effectiveFace,
       undefined,
       deviceType,
+      assemblyDepthMm,
     )
   ) {
     return false;
   }
 
-  // Collect container children
-  const children = sourceRack.devices.filter(
-    (d) => d.container_id === device.id,
-  );
   const parentSnapshot = snapshotDevice(device);
   const childrenSnapshots = children.map((child) => snapshotDevice(child));
 

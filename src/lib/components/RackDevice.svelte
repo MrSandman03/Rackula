@@ -286,7 +286,12 @@
       >();
 
     return new SvelteMap(
-      buildSlotGeometry(device.slots, deviceWidth, deviceHeight),
+      buildSlotGeometry(
+        device.slots,
+        deviceWidth,
+        deviceHeight,
+        device.u_height,
+      ),
     );
   });
 
@@ -370,21 +375,29 @@
     return `${base} at U${positionHuman}${imageState}${rearState}${selected ? ", selected" : ""}`;
   });
 
+  function emitSelection(
+    deviceId: string | undefined,
+    slug: string,
+    selectedPosition: number,
+  ) {
+    onselect?.(
+      new CustomEvent("select", {
+        detail: {
+          deviceId,
+          slug,
+          position: selectedPosition,
+          face: currentFace,
+        },
+      }),
+    );
+  }
+
   // Handle keyboard activation (Enter/Space to select, Tab to enter container)
   function handleKeyDown(event: KeyboardEvent) {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       event.stopPropagation();
-      onselect?.(
-        new CustomEvent("select", {
-          detail: {
-            deviceId: placedDeviceId,
-            slug: device.slug,
-            position,
-            face: currentFace,
-          },
-        }),
-      );
+      emitSelection(placedDeviceId, device.slug, position);
     }
 
     // Tab into container slots when container is selected
@@ -397,6 +410,26 @@
         (firstSlot as unknown as HTMLElement).focus();
       }
     }
+  }
+
+  function handleChildClick(
+    event: MouseEvent,
+    child: PlacedDevice,
+    childType: DeviceType,
+  ) {
+    event.stopPropagation();
+    emitSelection(child.id, childType.slug, child.position);
+  }
+
+  function handleChildKeyDown(
+    event: KeyboardEvent,
+    child: PlacedDevice,
+    childType: DeviceType,
+  ) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+    emitSelection(child.id, childType.slug, child.position);
   }
 
   // Pointer Events for unified mouse/touch handling (fixes Safari foreignObject bug #397)
@@ -714,7 +747,7 @@
     <!-- Label overlay when showLabelsOnImages is true
          Safari 18.x fix #420: Use SVG-native component instead of foreignObject
          to avoid transform inheritance bug -->
-    {#if showLabelsOnImages}
+    {#if showLabelsOnImages && containerChildDevices.length === 0}
       <LabelOverlaySVG
         text={fittedImageLabel.text}
         fontSize={fittedImageLabel.fontSize}
@@ -746,10 +779,11 @@
         y={(deviceHeight - 14) / 2}
       />
     {/if}
-  {:else}
+  {:else if containerChildDevices.length === 0}
     <!-- Device name (centered, auto-sized) -->
     <text
       class="device-name"
+      data-testid="rack-device-parent-label"
       x={deviceWidth / 2}
       y={deviceHeight / 2}
       dominant-baseline="middle"
@@ -835,6 +869,16 @@
             class="container-child"
             class:selected={isChildSelected}
             transform="translate({childX}, {childY})"
+            role="button"
+            tabindex="0"
+            aria-label={`${childName}, ${childType.u_height}U ${childType.category}, mounted in ${displayName}${isChildSelected ? ", selected" : ""}`}
+            aria-pressed={isChildSelected}
+            data-device-id={childType.slug}
+            data-device-uuid={child.id}
+            data-testid="container-child-device"
+            onclick={(event) => handleChildClick(event, child, childType)}
+            onpointerdown={(event) => event.stopPropagation()}
+            onkeydown={(event) => handleChildKeyDown(event, child, childType)}
           >
             <!-- Child device rectangle -->
             <rect

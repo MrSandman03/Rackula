@@ -22,6 +22,11 @@
     formatRelativeTime,
     formatFullTimestamp,
   } from "$lib/utils/buildTime";
+  import {
+    PROJECT_DOCS_URL,
+    PROJECT_REPOSITORY_URL,
+    projectCommitUrl,
+  } from "$lib/constants/project";
 
   interface Props {
     open: boolean;
@@ -44,9 +49,7 @@
     typeof __BRANCH_NAME__ !== "undefined" ? __BRANCH_NAME__ : "";
   const buildTime = typeof __BUILD_TIME__ !== "undefined" ? __BUILD_TIME__ : "";
   const isDirty = typeof __GIT_DIRTY__ !== "undefined" ? __GIT_DIRTY__ : false;
-  const commitUrl = commitHash
-    ? `https://github.com/RackulaLives/Rackula/commit/${commitHash}`
-    : "";
+  const commitUrl = projectCommitUrl(commitHash);
 
   // Live-updating relative time for build timestamp
   let now = $state(new Date());
@@ -141,19 +144,16 @@
   // only documents the gestures the palette has no equivalent for.
   const shortcutGroups = getHelpGroups();
 
-  const GITHUB_URL = "https://github.com/RackulaLives/Rackula";
-  const DOCS_URL = "https://docs.racku.la";
-
   // Pre-filled issue URLs
   const bugReportUrl = $derived.by(() => {
     const params = new URLSearchParams({
       template: "bug-report.yml",
       browser: `Rackula v${VERSION} on ${userAgent}`,
     });
-    return `${GITHUB_URL}/issues/new?${params.toString()}`;
+    return `${PROJECT_REPOSITORY_URL}/issues/new?${params.toString()}`;
   });
 
-  const discussionsUrl = `${GITHUB_URL}/discussions`;
+  const discussionsUrl = `${PROJECT_REPOSITORY_URL}/discussions`;
 </script>
 
 <Dialog {open} title="About Rackula" size="L" {onclose}>
@@ -183,7 +183,7 @@
     <!-- Quick links -->
     <div class="quick-links">
       <a
-        href={GITHUB_URL}
+        href={PROJECT_REPOSITORY_URL}
         target="_blank"
         rel="noopener noreferrer"
         class="quick-link"
@@ -210,7 +210,7 @@
         Share Ideas
       </a>
       <a
-        href={DOCS_URL}
+        href={PROJECT_DOCS_URL}
         target="_blank"
         rel="noopener noreferrer"
         class="quick-link"

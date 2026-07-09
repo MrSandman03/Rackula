@@ -192,6 +192,153 @@ describe("Container devices at rack level", () => {
       ),
     ).toBe(false);
   });
+
+  it("rejects a single device deeper than the rack", () => {
+    const deepType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "deep-device",
+        u_height: 1,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 300, height: 44 },
+        },
+      },
+    };
+    const rack = createTestRack({ height: 8, depth_mm: 260, devices: [] });
+
+    expect(
+      canPlaceDevice(
+        rack,
+        [deepType],
+        deepType.u_height,
+        toInternalUnits(3),
+        undefined,
+        "front",
+        undefined,
+        deepType,
+      ),
+    ).toBe(false);
+  });
+
+  it("uses mounted child depth when checking an existing tray assembly", () => {
+    const trayType = createTestContainerType({
+      slug: "open-tray",
+      u_height: 1,
+      is_full_depth: false,
+    });
+    const childType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "deep-child",
+        u_height: 1,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 120, depth: 200, height: 40 },
+        },
+      },
+    };
+    const rearType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "rear-device",
+        u_height: 1,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 120, depth: 70, height: 40 },
+        },
+      },
+    };
+    const rack = createTestRack({
+      height: 8,
+      depth_mm: 260,
+      devices: [
+        createTestDevice({
+          id: "tray-1",
+          device_type: "open-tray",
+          position: 3,
+          face: "front",
+        }),
+        createTestContainerChild({
+          id: "child-1",
+          device_type: "deep-child",
+          container_id: "tray-1",
+          slot_id: "slot-left",
+          position: 0,
+          face: "front",
+        }),
+      ],
+    });
+
+    expect(
+      canPlaceDevice(
+        rack,
+        [trayType, childType, rearType],
+        rearType.u_height,
+        toInternalUnits(3),
+        undefined,
+        "rear",
+        undefined,
+        rearType,
+      ),
+    ).toBe(false);
+  });
+
+  it("uses mounted child depth when moving a tray assembly", () => {
+    const trayType = createTestContainerType({
+      slug: "open-tray",
+      u_height: 1,
+      is_full_depth: false,
+    });
+    const childType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "too-deep-child",
+        u_height: 1,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 120, depth: 300, height: 40 },
+        },
+      },
+    };
+    const rack = createTestRack({
+      height: 8,
+      depth_mm: 260,
+      devices: [
+        createTestDevice({
+          id: "tray-1",
+          device_type: "open-tray",
+          position: 3,
+          face: "front",
+        }),
+        createTestContainerChild({
+          id: "child-1",
+          device_type: "too-deep-child",
+          container_id: "tray-1",
+          slot_id: "slot-left",
+          position: 0,
+          face: "front",
+        }),
+      ],
+    });
+
+    expect(
+      canPlaceDevice(
+        rack,
+        [trayType, childType],
+        trayType.u_height,
+        toInternalUnits(4),
+        0,
+        "front",
+        undefined,
+        trayType,
+      ),
+    ).toBe(false);
+  });
 });
 
 // =============================================================================
@@ -299,6 +446,222 @@ describe("canPlaceInContainer", () => {
         0,
       ),
     ).toBe(true);
+  });
+
+  it("rejects a child incompatible with the rack width", () => {
+    const containerType = createTestContainerType({
+      slug: "full-width-tray",
+      u_height: 1,
+      is_full_depth: false,
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+      ],
+    });
+    const childType = createTestDeviceType({
+      slug: "nineteen-inch-child",
+      u_height: 1,
+      slot_width: 2,
+      rack_widths: [19],
+      is_full_depth: false,
+    });
+    const container = createTestDevice({
+      id: "container-1",
+      device_type: containerType.slug,
+      position: toInternalUnits(3),
+      face: "front",
+    });
+    const rack = createTestRack({ width: 10, devices: [container] });
+
+    expect(
+      canPlaceInContainer(
+        rack,
+        [containerType, childType],
+        container,
+        containerType,
+        childType,
+        "main",
+        0,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a physically too-tall full-width child in a 0.5U slot", () => {
+    const containerType = createTestContainerType({
+      slug: "half-u-full-width-tray",
+      u_height: 1,
+      is_full_depth: false,
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 0.5,
+        },
+      ],
+    });
+    const childType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "tall-half-u-child",
+        u_height: 0.5,
+        slot_width: 2,
+        rack_widths: [10],
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 100, depth: 100, height: 30 },
+        },
+      },
+    };
+    const container = createTestDevice({
+      id: "container-1",
+      device_type: containerType.slug,
+      position: toInternalUnits(3),
+      face: "front",
+    });
+    const rack = createTestRack({ width: 10, devices: [container] });
+
+    expect(
+      canPlaceInContainer(
+        rack,
+        [containerType, childType],
+        container,
+        containerType,
+        childType,
+        "main",
+        0,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a child deeper than the rack", () => {
+    const containerType = createTestContainerType({
+      slug: "full-width-tray",
+      u_height: 1,
+      is_full_depth: false,
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+      ],
+    });
+    const childType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "deep-child",
+        u_height: 1,
+        slot_width: 2,
+        rack_widths: [10],
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 300, height: 40 },
+        },
+      },
+    };
+    const container = createTestDevice({
+      id: "container-1",
+      device_type: containerType.slug,
+      position: toInternalUnits(3),
+      face: "front",
+    });
+    const rack = createTestRack({
+      width: 10,
+      depth_mm: 260,
+      devices: [container],
+    });
+
+    expect(
+      canPlaceInContainer(
+        rack,
+        [containerType, childType],
+        container,
+        containerType,
+        childType,
+        "main",
+        0,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a child whose assembly conflicts with opposing rear depth", () => {
+    const containerType = createTestContainerType({
+      slug: "front-tray",
+      u_height: 1,
+      is_full_depth: false,
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+      ],
+    });
+    const childType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "front-child",
+        u_height: 1,
+        slot_width: 2,
+        rack_widths: [10],
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 200, height: 40 },
+        },
+      },
+    };
+    const rearType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "rear-device",
+        u_height: 1,
+        rack_widths: [10],
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 70, height: 40 },
+        },
+      },
+    };
+    const container = createTestDevice({
+      id: "container-1",
+      device_type: containerType.slug,
+      position: toInternalUnits(3),
+      face: "front",
+    });
+    const rear = createTestDevice({
+      id: "rear-1",
+      device_type: rearType.slug,
+      position: toInternalUnits(3),
+      face: "rear",
+    });
+    const rack = createTestRack({
+      width: 10,
+      depth_mm: 260,
+      devices: [container, rear],
+    });
+
+    expect(
+      canPlaceInContainer(
+        rack,
+        [containerType, childType, rearType],
+        container,
+        containerType,
+        childType,
+        "main",
+        0,
+      ),
+    ).toBe(false);
   });
 
   it("allows moving a child device to same position (excludeDeviceId)", () => {

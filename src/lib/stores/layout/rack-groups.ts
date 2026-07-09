@@ -8,6 +8,7 @@
 import type { Rack, RackGroup, LayoutPreset } from "$lib/types";
 import { MAX_RACKS } from "$lib/types/constants";
 import { createDefaultRack } from "$lib/utils/serialization";
+import { isRackMateT1Plus } from "$lib/utils/rack-profile";
 import { layoutDebug } from "$lib/utils/debug";
 import { generateRackId, generateGroupId } from "$lib/utils/rack";
 import {
@@ -33,6 +34,31 @@ import {
   type RackPositionAssignment,
 } from "$lib/utils/rack-row";
 import type { LayoutStateAccess } from "./types";
+
+function createBayRackFromSource(source: Rack, name: string, id: string): Rack {
+  const validWidths: Rack["width"][] = [10, 19, 21, 23];
+  const width = (
+    validWidths.includes(source.width) ? source.width : 19
+  ) as Rack["width"];
+  const rack = createDefaultRack(
+    name,
+    source.height,
+    width,
+    source.form_factor,
+    source.desc_units,
+    source.starting_unit,
+    source.show_rear,
+    id,
+    source.profile,
+  );
+
+  // Named profiles own their dimensions. Generic racks retain a deliberately
+  // configured depth instead of reverting to the factory's 1000mm default.
+  if (!source.profile && source.depth_mm !== undefined) {
+    rack.depth_mm = source.depth_mm;
+  }
+  return rack;
+}
 
 // =============================================================================
 // Raw Mutators (for undo/redo system — bypass history)
@@ -458,19 +484,9 @@ export function addBayToGroup(
   // Create new rack with matching height, using createDefaultRack for proper field initialization
   const newRackId = generateRackId();
   const bayNumber = group.rack_ids.length + 1;
-  // Validate width - default to 19 if the persisted value is unexpected.
-  const validWidths: Rack["width"][] = [10, 19, 21, 23];
-  const width = (
-    validWidths.includes(existingRack.width) ? existingRack.width : 19
-  ) as Rack["width"];
-  const newRack = createDefaultRack(
+  const newRack = createBayRackFromSource(
+    existingRack,
     `Bay ${bayNumber}`,
-    existingRack.height,
-    width,
-    existingRack.form_factor,
-    existingRack.desc_units,
-    existingRack.starting_unit,
-    existingRack.show_rear,
     newRackId,
   );
 
@@ -646,23 +662,13 @@ export function setBayCount(
       return { error: "Group has no existing racks" };
     }
 
-    const validWidths: Rack["width"][] = [10, 19, 21, 23];
-    const width = (
-      validWidths.includes(existingRack.width) ? existingRack.width : 19
-    ) as Rack["width"];
-
     const newRackIds: string[] = [];
     for (let i = currentCount; i < targetCount; i++) {
       const newRackId = generateRackId();
       const bayNumber = i + 1;
-      const newRack = createDefaultRack(
+      const newRack = createBayRackFromSource(
+        existingRack,
         `Bay ${bayNumber}`,
-        existingRack.height,
-        width,
-        existingRack.form_factor,
-        existingRack.desc_units,
-        existingRack.starting_unit,
-        existingRack.show_rear,
         newRackId,
       );
       commands.push(createAddRackCommand(newRack, rackAdapter));
@@ -854,21 +860,10 @@ export function createBayedRack(
     assignments.find((a) => a.id === newRackId)?.position ??
     layout.racks.length;
 
-  // Inherit the uniform fields from the source. width is re-validated because a
-  // persisted layout could carry an unexpected value.
-  const validWidths: Rack["width"][] = [10, 19, 21, 23];
-  const width = (
-    validWidths.includes(sourceRack.width) ? sourceRack.width : 19
-  ) as Rack["width"];
   const bayNumber = (existingGroup ? existingGroup.rack_ids.length : 1) + 1;
-  const newRack = createDefaultRack(
+  const newRack = createBayRackFromSource(
+    sourceRack,
     `Bay ${bayNumber}`,
-    sourceRack.height,
-    width,
-    sourceRack.form_factor,
-    sourceRack.desc_units,
-    sourceRack.starting_unit,
-    sourceRack.show_rear,
     newRackId,
   );
   newRack.position = newPosition;
@@ -950,6 +945,15 @@ export function resizeBayedGroupHeight(
   }
   if (group.layout_preset !== "bayed") {
     return { error: "Can only resize bayed rack groups" };
+  }
+
+  const layout = ctx.getLayout();
+  if (
+    group.rack_ids.some((rackId) =>
+      isRackMateT1Plus(layout.racks.find((rack) => rack.id === rackId)),
+    )
+  ) {
+    return { error: "Cannot resize a bay containing a fixed rack profile" };
   }
 
   updateRacksBatchRecordedFn(

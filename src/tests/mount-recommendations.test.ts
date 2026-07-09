@@ -22,9 +22,9 @@ describe("RackMate mount recommendations", () => {
   it("recommends RackMate utility trays for the UCG-Max", () => {
     const gateway = findBrandDevice("ubiquiti-unifi-cloud-gateway-max")!;
 
-    expect(getRecommendedMountSlugs(gateway)).toContain(
+    expect(getRecommendedMountSlugs(gateway)).toEqual([
       "deskpi-rackmate-1u-utility-tray",
-    );
+    ]);
     expect(getMountRecommendation(gateway, 10, library)?.requirement).toContain(
       "RackMate 1U Utility Tray Placeholder",
     );

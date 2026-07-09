@@ -263,7 +263,7 @@ test.describe("Accessibility", () => {
       await expect(
         page.locator(locators.device.paletteItem).first(),
       ).toBeVisible();
-      await page.locator(locators.device.paletteItem).first().click();
+      await page.getByTestId("device-palette-select").first().click();
 
       // Confirm the Placing banner is visible.
       const banner = page
@@ -293,7 +293,7 @@ test.describe("Accessibility", () => {
       await expect(
         page.locator(locators.device.paletteItem).first(),
       ).toBeVisible();
-      await page.locator(locators.device.paletteItem).first().click();
+      await page.getByTestId("device-palette-select").first().click();
 
       // The placement banner is a polite status region naming the pending
       // device. getByRole finds the live region regardless of markup.
@@ -314,7 +314,7 @@ test.describe("Accessibility", () => {
       await expect(
         page.locator(locators.device.paletteItem).first(),
       ).toBeVisible();
-      await page.locator(locators.device.paletteItem).first().click();
+      await page.getByTestId("device-palette-select").first().click();
 
       // The Placing banner must be visible before cancel.
       const banner = page

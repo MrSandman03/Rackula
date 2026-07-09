@@ -2,7 +2,7 @@
  * Layout Serialization and Factory Functions
  */
 
-import type { Layout, Rack, FormFactor } from "$lib/types";
+import type { Layout, Rack, FormFactor, RackProfile } from "$lib/types";
 import { VERSION } from "$lib/version";
 import { generateId } from "./device";
 import { withRackProfileDefaults } from "./rack-profile";
@@ -50,12 +50,14 @@ export function createDefaultRack(
   starting_unit: number = 1,
   show_rear: boolean = true,
   id: string = "rack-1",
+  profile?: RackProfile,
 ): Rack {
   return withRackProfileDefaults({
     id,
     name,
     height,
     width,
+    ...(profile ? { profile } : {}),
     desc_units,
     show_rear,
     form_factor,

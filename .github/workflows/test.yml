@@ -3,17 +3,6 @@ name: Test
 on:
   pull_request:
     branches: [main]
-    # Skip the suite for non-code-only PRs. A PR runs CI unless ALL its changed
-    # files match here, so mixed docs+code PRs still run. workflow_dispatch and
-    # workflow_call ignore path filters, so manual/reusable runs are unaffected.
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "LICENSE"
-      - ".editorconfig"
-      - ".gitattributes"
-      - ".vscode/**"
-      - ".github/ISSUE_TEMPLATE/**"
   workflow_dispatch:
   workflow_call:
 
@@ -146,18 +135,25 @@ jobs:
       - name: Run smoke E2E tests
         run: npm run test:e2e:smoke
 
+      - name: Run RackMate E2E tests
+        run: npm run test:e2e:rackmate
+
       # The smoke E2E webServer runs `npm run build`, so dist/ exists here. Scan
       # the built HTML for inline <script> tags (must be none, so the CSP can
       # stay script-src 'self').
       - name: Scan dist for inline scripts
         run: bash scripts/check-header-parity.sh --with-build
 
-      - name: Upload Playwright report
+      - name: Upload Playwright reports
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: playwright-report
-          path: playwright-report/
+          path: |
+            playwright-report/
+            blob-report/
+            test-results/
+          if-no-files-found: ignore
           retention-days: 7
 
   # Tier 2/3 of the two-tier E2E model (spike #1994). The full browser suite
@@ -168,8 +164,9 @@ jobs:
   e2e-self-hosted:
     name: e2e (self-hosted full suite)
     needs: [validate, detect]
-    # Fail open on detect; still gate on validate succeeding and PR context.
-    if: ${{ !cancelled() && needs.validate.result == 'success' && github.event_name == 'pull_request' && !(needs.detect.result == 'success' && needs.detect.outputs.autoformat == 'true') }}
+    # The RackMate fork has no upstream homelab runner or approval environments.
+    # Keep this additive tier upstream-only so fork PRs conclude after hosted CI.
+    if: ${{ github.repository == 'RackulaLives/Rackula' && !cancelled() && needs.validate.result == 'success' && github.event_name == 'pull_request' && !(needs.detect.result == 'success' && needs.detect.outputs.autoformat == 'true') }}
     # Advisory, not merge-blocking. Per spike #1994 the self-hosted tier is
     # *additive* to the GH-hosted chromium smoke (the validate job), which stays
     # the hard gate. This job runs on a single homelab VM (one runner, one host)

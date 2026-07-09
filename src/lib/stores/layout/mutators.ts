@@ -20,6 +20,10 @@ import type {
 import { layoutDebug } from "$lib/utils/debug";
 import { generateId } from "$lib/utils/device";
 import { sanitizeFilename } from "$lib/utils/imageUpload";
+import {
+  constrainRackProfileUpdates,
+  withRackProfileDefaults,
+} from "$lib/utils/rack-profile";
 import type { LayoutStateAccess } from "./types";
 import { getTargetRack } from "./rack-actions";
 
@@ -507,8 +511,12 @@ export function updateRackRaw(
   // change (e.g. a cycle-rack shortcut) cannot mutate the wrong rack (#2737).
   const target = getTargetRack(ctx, rackId);
   if (!target) return;
+  const constrainedUpdates = constrainRackProfileUpdates(target.rack, updates);
 
-  updateRackAtIndex(ctx, target.index, (rack) => ({ ...rack, ...updates }));
+  updateRackAtIndex(ctx, target.index, (rack) => ({
+    ...rack,
+    ...constrainedUpdates,
+  }));
 }
 
 /**
@@ -521,7 +529,7 @@ export function replaceRackRaw(ctx: LayoutStateAccess, newRack: Rack): void {
   const target = getTargetRack(ctx);
   if (!target) return;
 
-  updateRackAtIndex(ctx, target.index, () => newRack);
+  updateRackAtIndex(ctx, target.index, () => withRackProfileDefaults(newRack));
 }
 
 /**

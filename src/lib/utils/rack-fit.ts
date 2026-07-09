@@ -1,4 +1,4 @@
-import type { DeviceType, Rack } from "$lib/types";
+import type { DeviceType, Rack, RackProfile } from "$lib/types";
 import { requiresChassisBay } from "./carrier-rules";
 import { canPlaceInSlot } from "./collision";
 import { findDeviceType } from "./device-lookup";
@@ -18,19 +18,47 @@ export interface RackFitSummary {
 
 interface RackulaFitFields {
   status?: string;
-  recommended_mount_slugs?: string[];
   rackmate_t1_plus_depth_clearance_mm?: number;
-  open_checks?: string[];
+  open_checks: string[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }
 
 function rackulaFitFields(device: DeviceType): RackulaFitFields {
-  return (
-    (device.custom_fields?.rackula_fit as RackulaFitFields | undefined) ?? {}
-  );
+  const raw = device.custom_fields?.rackula_fit;
+  if (!isRecord(raw)) return { open_checks: [] };
+
+  const clearance = raw.rackmate_t1_plus_depth_clearance_mm;
+  return {
+    status: typeof raw.status === "string" ? raw.status : undefined,
+    rackmate_t1_plus_depth_clearance_mm:
+      typeof clearance === "number" && Number.isFinite(clearance)
+        ? clearance
+        : undefined,
+    open_checks: stringArray(raw.open_checks),
+  };
+}
+
+export function getRackulaFitOpenChecks(device: DeviceType): string[] {
+  return rackulaFitFields(device).open_checks;
 }
 
 function statusLabel(status: string | undefined): RackFitSummary | null {
   switch (status) {
+    case "candidate":
+      return {
+        label: "Candidate",
+        title: "Candidate fit, not yet build-verified",
+        tone: "info",
+      };
     case "planned":
       return {
         label: "Plan",
@@ -38,6 +66,7 @@ function statusLabel(status: string | undefined): RackFitSummary | null {
         tone: "info",
       };
     case "needs_measurement":
+    case "physically_plausible_needs_measurement":
       return {
         label: "Verify",
         title: "Fit needs physical measurement",
@@ -84,6 +113,7 @@ function firstFittingMount(
       canPlaceInSlot(device, slot, {
         rackWidth,
         containerHeightUnits: mount.u_height,
+        containerSlots: mount.slots,
       }),
     ),
   );
@@ -97,35 +127,9 @@ export function getRackFitSummary(
   device: DeviceType,
   rackWidth: Rack["width"],
   library: DeviceType[] = [],
+  rackProfile?: RackProfile,
 ): RackFitSummary | null {
   const fit = rackulaFitFields(device);
-
-  if (requiresChassisBay(device, rackWidth)) {
-    const fittingMount = firstFittingMount(device, rackWidth, library);
-    const recommendation = getMountRecommendation(device, rackWidth, library);
-    if (fittingMount) {
-      return {
-        label: "Mount",
-        title: `Requires a chassis bay or tray; fits ${labelForMount(fittingMount)}`,
-        tone: "info",
-      };
-    }
-    if (fit.recommended_mount_slugs && fit.recommended_mount_slugs.length > 0) {
-      return {
-        label: "No bay",
-        title: "Recommended mounts do not fit this rack width or slot geometry",
-        tone: "blocked",
-      };
-    }
-    return {
-      label: "Bay",
-      title:
-        recommendation?.summary ??
-        "Requires a chassis bay, tray, carrier, or printed mount",
-      tone: "info",
-    };
-  }
-
   const rackWidthMm = rackWidthToMillimetres(rackWidth);
   const dimensions = getDeviceDimensionsMm(device);
   if (
@@ -140,8 +144,24 @@ export function getRackFitSummary(
     };
   }
 
+  const needsBay = requiresChassisBay(device, rackWidth);
+  const fittingMount = needsBay
+    ? firstFittingMount(device, rackWidth, library)
+    : undefined;
+  const recommendedMountSlugs = needsBay
+    ? getRecommendedMountSlugs(device)
+    : [];
+  if (needsBay && recommendedMountSlugs.length > 0 && !fittingMount) {
+    return {
+      label: "No bay",
+      title: "Recommended mounts do not fit this rack width or slot geometry",
+      tone: "blocked",
+    };
+  }
+
   if (
-    typeof fit.rackmate_t1_plus_depth_clearance_mm === "number" &&
+    rackProfile === "rackmate-t1-plus" &&
+    fit.rackmate_t1_plus_depth_clearance_mm !== undefined &&
     fit.rackmate_t1_plus_depth_clearance_mm <= 10
   ) {
     return {
@@ -151,14 +171,32 @@ export function getRackFitSummary(
     };
   }
 
-  const status = statusLabel(fit.status);
-  if (status) return status;
-
-  if (fit.open_checks && fit.open_checks.length > 0) {
+  if (fit.open_checks.length > 0) {
     return {
       label: "Check",
       title: fit.open_checks.slice(0, 3).join("; "),
       tone: "warn",
+    };
+  }
+
+  const status = statusLabel(fit.status);
+  if (status) return status;
+
+  if (needsBay) {
+    const recommendation = getMountRecommendation(device, rackWidth, library);
+    if (fittingMount) {
+      return {
+        label: "Mount",
+        title: `Requires a chassis bay or tray; fits ${labelForMount(fittingMount)}`,
+        tone: "info",
+      };
+    }
+    return {
+      label: "Bay",
+      title:
+        recommendation?.summary ??
+        "Requires a chassis bay, tray, carrier, or printed mount",
+      tone: "info",
     };
   }
 

@@ -188,6 +188,7 @@ export function dispatchDropAction(
             action.targetU,
             action.excludeIndex,
             collisionContext.faceFilter,
+            action.deviceType,
           );
         if (message) {
           collisionContext.toastStore.showToast(message, "warning", 3000);

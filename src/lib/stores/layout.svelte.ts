@@ -444,6 +444,7 @@ export function createLayoutStore(
     form_factor?: FormFactor,
     desc_units?: boolean,
     starting_unit?: number,
+    profile?: Rack["profile"],
   ) {
     return addRackImpl(
       stateAccess,
@@ -453,6 +454,7 @@ export function createLayoutStore(
       form_factor,
       desc_units,
       starting_unit,
+      profile,
     );
   }
 

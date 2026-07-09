@@ -10,6 +10,7 @@
 
 import { describe, it, expect } from "vitest";
 import { getBrandPacks } from "$lib/data/brandPacks";
+import { BRAND_DEVICE_REGISTRY } from "$lib/data/brandPacks/registry";
 import { DeviceTypeSchema } from "$lib/schemas";
 
 // Get all brand packs dynamically - no hardcoded list needed
@@ -57,6 +58,17 @@ describe("Brand Packs", () => {
 });
 
 describe("Cross-Brand Validation", () => {
+  it("keeps the built-in registry in sync with every brand pack", () => {
+    const packSlugs = ALL_BRAND_PACKS.flatMap((pack) =>
+      pack.devices.map((device) => device.slug),
+    );
+    const registrySlugs = BRAND_DEVICE_REGISTRY.map((device) => device.slug);
+
+    expect([...new Set(registrySlugs)].sort()).toEqual(
+      [...new Set(packSlugs)].sort(),
+    );
+  });
+
   it("no duplicate slugs across all brand packs", () => {
     const allSlugs: string[] = [];
     for (const pack of ALL_BRAND_PACKS) {

@@ -44,6 +44,7 @@ import { minisforumDevices } from "./minisforum";
 import { beelinkDevices } from "./beelink";
 import { raspberryPiDevices } from "./raspberry-pi";
 import { zimaDevices } from "./zima";
+import { BRAND_DEVICE_REGISTRY } from "./registry";
 
 export {
   ubiquitiDevices,
@@ -472,42 +473,7 @@ let cachedBrandDevices: DeviceType[] | null = null;
  */
 export function getAllBrandDevices(): DeviceType[] {
   if (!cachedBrandDevices) {
-    cachedBrandDevices = [
-      ...ubiquitiDevices,
-      ...mikrotikDevices,
-      ...tplinkDevices,
-      ...synologyDevices,
-      ...apcDevices,
-      ...dellDevices,
-      ...supermicroDevices,
-      ...hpeDevices,
-      ...fortinetDevices,
-      ...eatonDevices,
-      ...ecoflowDevices,
-      ...guitkDevices,
-      ...netgearDevices,
-      ...pecronDevices,
-      ...paloaltoDevices,
-      ...qnapDevices,
-      ...lenovoDevices,
-      ...cyberpowerDevices,
-      ...netgateDevices,
-      ...blackmagicdesignDevices,
-      ...deskpiDevices,
-      ...kwsDevices,
-      ...acInfinityDevices,
-      ...appleDevices,
-      ...ciscoDevices,
-      ...aristaDevices,
-      ...juniperDevices,
-      ...vertivDevices,
-      ...fsDevices,
-      ...intelDevices,
-      ...minisforumDevices,
-      ...beelinkDevices,
-      ...raspberryPiDevices,
-      ...zimaDevices,
-    ];
+    cachedBrandDevices = [...BRAND_DEVICE_REGISTRY];
   }
   return cachedBrandDevices;
 }

@@ -182,6 +182,16 @@ export function paletteItemByName(page: Page, deviceName: string): Locator {
   });
 }
 
+/** Locate the accessible placement button inside a named palette row. */
+export function paletteSelectButtonByName(
+  page: Page,
+  deviceName: string,
+): Locator {
+  return paletteItemByName(page, deviceName).getByTestId(
+    "device-palette-select",
+  );
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

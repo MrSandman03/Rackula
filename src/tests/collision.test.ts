@@ -123,6 +123,55 @@ describe("Collision Detection", () => {
   });
 
   describe("canPlaceDevice", () => {
+    it("rejects a target device incompatible with the rack width", () => {
+      const rack = createTestRack(8);
+      rack.width = 10;
+      const device: DeviceType = {
+        ...createTestDevice("standard-19-inch", 1),
+        rack_widths: [19],
+      };
+
+      expect(
+        canPlaceDevice(
+          rack,
+          [device],
+          device.u_height,
+          toInternalUnits(1),
+          undefined,
+          "front",
+          undefined,
+          device,
+        ),
+      ).toBe(false);
+    });
+
+    it("rejects a target device physically wider than the rack", () => {
+      const rack = createTestRack(8);
+      rack.width = 10;
+      const device: DeviceType = {
+        ...createTestDevice("oversized-10-inch", 1),
+        rack_widths: [10],
+        custom_fields: {
+          rackula_fit: {
+            dimensions_mm: { width: 300, depth: 100, height: 40 },
+          },
+        },
+      };
+
+      expect(
+        canPlaceDevice(
+          rack,
+          [device],
+          device.u_height,
+          toInternalUnits(1),
+          undefined,
+          "front",
+          undefined,
+          device,
+        ),
+      ).toBe(false);
+    });
+
     it("returns true for empty rack", () => {
       const rack = createTestRack(42);
       const deviceLibrary: DeviceType[] = [];

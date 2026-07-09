@@ -16,6 +16,7 @@
   import { getUIStore } from "$lib/stores/ui.svelte";
   import { getCanvasStore } from "$lib/stores/canvas.svelte";
   import {
+    canFitRackDimensions,
     canResizeRackTo,
     getConflictDetails,
     formatConflictMessage,
@@ -30,6 +31,10 @@
     DEFAULT_RACK_DEPTH_MM,
     DEFAULT_RACK_BASE_WEIGHT,
   } from "$lib/types/constants";
+  import {
+    isRackMateT1Plus,
+    RACKMATE_T1_PLUS_PROFILE,
+  } from "$lib/utils/rack-profile";
   import type {
     Rack,
     RackGroup,
@@ -63,13 +68,14 @@
   ];
 
   const heightPresets = $derived(
-    selectedRack.width === 10 ? MINI_RACK_HEIGHTS : COMMON_RACK_HEIGHTS,
+    isRackMateT1Plus(selectedRack) ? MINI_RACK_HEIGHTS : COMMON_RACK_HEIGHTS,
   );
   const depthPresets = $derived(
-    selectedRack.width === 10
+    isRackMateT1Plus(selectedRack)
       ? RACKMATE_DEPTH_PRESETS_MM
       : RACK_DEPTH_PRESETS_MM,
   );
+  const isRackMateRack = $derived(isRackMateT1Plus(selectedRack));
 
   // Local state for form fields
   let rackName = $state("");
@@ -96,10 +102,9 @@
     weightError = null;
   });
 
-  // In this RackMate-focused fork, a 10-inch rack means the user's RackMate T1
-  // Plus. Keep its physical profile pinned when doing so is non-destructive.
+  // Keep explicit RackMate profiles pinned to their physical dimensions.
   $effect(() => {
-    if (selectedRack.width !== 10) return;
+    if (!isRackMateRack) return;
 
     if (selectedRack.depth_mm !== RACKMATE_T1_PLUS_DEPTH_MM) {
       rackDepth = RACKMATE_T1_PLUS_DEPTH_MM;
@@ -165,7 +170,7 @@
 
   // Validate and apply height change
   function attemptHeightChange(newHeight: number): boolean {
-    if (selectedRack.width === 10 && newHeight !== RACKMATE_T1_PLUS_HEIGHT) {
+    if (isRackMateRack && newHeight !== RACKMATE_T1_PLUS_HEIGHT) {
       resizeError = "RackMate T1 Plus height is locked to 8U.";
       rackHeight = selectedRack.height;
       return false;
@@ -232,23 +237,64 @@
   }
 
   function handleWidthPresetClick(width: Rack["width"]) {
-    if (width === 10 && selectedRack.height !== RACKMATE_T1_PLUS_HEIGHT) {
-      rackHeight = RACKMATE_T1_PLUS_HEIGHT;
-      if (!attemptHeightChange(RACKMATE_T1_PLUS_HEIGHT)) {
+    const selectRackMate = width === 10;
+    const changesProfile = selectRackMate !== isRackMateRack;
+    if (width === selectedRack.width && !changesProfile) {
+      resizeError = null;
+      return;
+    }
+
+    const group =
+      selectedGroup ?? layoutStore.getRackGroupForRack(selectedRack.id);
+    if (group?.layout_preset === "bayed" && changesProfile) {
+      resizeError = "Bayed rack profiles must be changed as a group.";
+      rackHeight = selectedRack.height;
+      rackDepth = selectedRack.depth_mm ?? DEFAULT_RACK_DEPTH_MM;
+      return;
+    }
+
+    if (selectRackMate) {
+      const result = canFitRackDimensions(
+        selectedRack,
+        {
+          width: 10,
+          height: RACKMATE_T1_PLUS_HEIGHT,
+          depth_mm: RACKMATE_T1_PLUS_DEPTH_MM,
+        },
+        layoutStore.device_types,
+      );
+
+      if (!result.allowed) {
+        const conflictDetails = getConflictDetails(
+          result.conflicts,
+          layoutStore.device_types,
+        );
+        resizeError = `RackMate T1 Plus cannot contain ${formatConflictMessage(conflictDetails)}`;
+        rackHeight = selectedRack.height;
         return;
       }
+
+      rackHeight = RACKMATE_T1_PLUS_HEIGHT;
+      rackDepth = RACKMATE_T1_PLUS_DEPTH_MM;
+      resizeError = null;
     }
 
     layoutStore.updateRack(selectedRack.id, {
       width,
-      ...(width === 10 ? { depth_mm: RACKMATE_T1_PLUS_DEPTH_MM } : {}),
+      profile: selectRackMate ? RACKMATE_T1_PLUS_PROFILE : undefined,
+      ...(selectRackMate
+        ? {
+            height: RACKMATE_T1_PLUS_HEIGHT,
+            depth_mm: RACKMATE_T1_PLUS_DEPTH_MM,
+          }
+        : {}),
     });
   }
 
   // Apply a depth value in millimetres. Rejects blank, non-finite, and
   // non-positive input so the store never receives an invalid measurement.
   function applyDepth(value: number) {
-    if (selectedRack.width === 10 && value !== RACKMATE_T1_PLUS_DEPTH_MM) {
+    if (isRackMateRack && value !== RACKMATE_T1_PLUS_DEPTH_MM) {
       depthError = "RackMate T1 Plus depth is locked to 260 mm.";
       rackDepth = RACKMATE_T1_PLUS_DEPTH_MM;
       if (selectedRack.depth_mm !== RACKMATE_T1_PLUS_DEPTH_MM) {
@@ -389,7 +435,7 @@
       onchange={handleDepthChange}
       min="1"
       step="1"
-      readonly={selectedRack.width === 10}
+      readonly={isRackMateRack}
     />
     {#if depthError}
       <p class="helper-text error">{depthError}</p>

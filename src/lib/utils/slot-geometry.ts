@@ -1,5 +1,5 @@
 import type { Slot } from "$lib/types";
-import { slotHeightUnits, slotWidthFraction } from "./slot-fit";
+import { effectiveSlotHeightUnits, slotWidthFraction } from "./slot-fit";
 
 export interface SlotGeometry {
   x: number;
@@ -21,15 +21,24 @@ export function buildSlotGeometry(
   slots: readonly Slot[],
   containerWidth: number,
   containerHeight: number,
+  containerHeightUnits?: number,
 ): Map<string, SlotGeometry> {
   const geometry = new Map<string, SlotGeometry>();
   if (slots.length === 0) return geometry;
 
   const rows = sortedUnique(slots.map((slot) => slot.position.row));
+  const heightContext = { containerHeightUnits, containerSlots: slots };
   const rowHeights = new Map<number, number>();
   for (const row of rows) {
     const rowSlots = slots.filter((slot) => slot.position.row === row);
-    rowHeights.set(row, Math.max(...rowSlots.map(slotHeightUnits)));
+    rowHeights.set(
+      row,
+      Math.max(
+        ...rowSlots.map((slot) =>
+          effectiveSlotHeightUnits(slot, heightContext),
+        ),
+      ),
+    );
   }
 
   const totalHeightUnits = rows.reduce(
@@ -37,7 +46,11 @@ export function buildSlotGeometry(
     0,
   );
   const heightScale =
-    totalHeightUnits > 0 ? containerHeight / totalHeightUnits : containerHeight;
+    containerHeightUnits !== undefined && containerHeightUnits > 0
+      ? containerHeight / containerHeightUnits
+      : totalHeightUnits > 0
+        ? containerHeight / totalHeightUnits
+        : containerHeight;
 
   let unitsBelow = 0;
   for (const row of rows) {
@@ -51,7 +64,7 @@ export function buildSlotGeometry(
 
     for (const slot of rowSlots) {
       const width = containerWidth * slotWidthFraction(slot);
-      const heightUnits = slotHeightUnits(slot);
+      const heightUnits = effectiveSlotHeightUnits(slot, heightContext);
       geometry.set(slot.id, {
         x,
         y: rowY + (rowHeight - heightUnits) * heightScale,
@@ -73,7 +86,13 @@ export function slotGeometryFor(
   slotId: string | undefined,
   containerWidth: number,
   containerHeight: number,
+  containerHeightUnits?: number,
 ): SlotGeometry | undefined {
   if (!slots || !slotId) return undefined;
-  return buildSlotGeometry(slots, containerWidth, containerHeight).get(slotId);
+  return buildSlotGeometry(
+    slots,
+    containerWidth,
+    containerHeight,
+    containerHeightUnits,
+  ).get(slotId);
 }

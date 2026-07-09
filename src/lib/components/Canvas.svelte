@@ -556,9 +556,8 @@
 
   .onboarding-hint {
     position: absolute;
+    right: var(--space-6, 24px);
     bottom: var(--space-6, 24px);
-    left: 50%;
-    transform: translateX(-50%);
     display: flex;
     align-items: center;
     gap: var(--space-3, 12px);
@@ -568,9 +567,22 @@
     border-radius: var(--radius-md, 6px);
     color: var(--colour-text-muted);
     font-size: var(--font-size-sm);
-    max-width: min(90%, 480px);
+    box-sizing: border-box;
+    max-width: min(45%, 320px);
     pointer-events: none;
     z-index: 10;
+  }
+
+  @media (max-width: 1024px) {
+    .onboarding-hint {
+      right: var(--space-3, 12px);
+      bottom: calc(
+        var(--bottom-nav-height, 64px) + var(--space-3, 12px) +
+          env(safe-area-inset-bottom, 0px)
+      );
+      left: var(--space-3, 12px);
+      max-width: none;
+    }
   }
 
   .hint-dismiss {

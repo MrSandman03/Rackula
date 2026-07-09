@@ -25,19 +25,7 @@ import { findDeviceType } from "$lib/utils/device-lookup";
 import { getDeviceDisplayName } from "$lib/utils/device";
 import { screenToSVG } from "$lib/utils/coordinates";
 import { getMountRecommendation } from "$lib/utils/mount-recommendations";
-
-/**
- * The rail height of a synthesised carrier, defaulting to 1U if the slug is
- * somehow absent from the library (defensive: the synthesised carriers are
- * always present). Shared by resolveDropTarget and resolveDropAction so both
- * validate the same rail footprint.
- */
-function getCarrierHeight(
-  carrierSlug: string,
-  deviceLibrary: DeviceType[],
-): number {
-  return findDeviceType(carrierSlug, deviceLibrary)?.u_height ?? 1;
-}
+import { toInternalUnits } from "$lib/utils/position";
 
 /** Pixel-based measurements of a rack, used by the drop calculation pipeline. */
 export interface RackDimensions {
@@ -122,6 +110,7 @@ export type DropAction =
       targetU: number;
       deviceHeight: number;
       excludeIndex?: number;
+      deviceType?: DeviceType;
       /**
        * Explicit user-facing message that overrides the collision-derived one.
        * Set for the honest "requires a chassis" case (a chassis child dropped on
@@ -257,7 +246,8 @@ export function resolveDropTarget(
     feedback = "valid";
   } else if (carrierSlug) {
     // Synthesise a rail carrier at this U: validate its full rail footprint.
-    const carrierHeight = getCarrierHeight(carrierSlug, deviceLibrary);
+    const carrierType = findDeviceType(carrierSlug, deviceLibrary);
+    const carrierHeight = carrierType?.u_height ?? 1;
     previewHeight = carrierHeight;
     feedback = getDropFeedback(
       rack,
@@ -266,6 +256,7 @@ export function resolveDropTarget(
       targetU,
       excludeIndex,
       "both",
+      carrierType,
     );
   } else if (needsBay) {
     // Requires a chassis bay but none is under the cursor: honestly invalid.
@@ -354,7 +345,8 @@ export function resolveDropAction(
   // carrier at the target U via the store. Validate the carrier's full rail
   // footprint (height-matched: a 2U carrier needs 2U of clear rail).
   if (carrierSlug) {
-    const carrierHeight = getCarrierHeight(carrierSlug, deviceLibrary);
+    const carrierType = findDeviceType(carrierSlug, deviceLibrary);
+    const carrierHeight = carrierType?.u_height ?? 1;
     const carrierFeedback = getDropFeedback(
       rack,
       deviceLibrary,
@@ -362,6 +354,7 @@ export function resolveDropAction(
       targetU,
       excludeIndex,
       "both",
+      carrierType,
     );
     if (carrierFeedback !== "valid") {
       return {
@@ -370,6 +363,7 @@ export function resolveDropAction(
         targetU,
         deviceHeight: carrierHeight,
         excludeIndex,
+        deviceType: carrierType,
       };
     }
     return {
@@ -394,6 +388,7 @@ export function resolveDropAction(
       targetU,
       deviceHeight: dragData.device.u_height,
       excludeIndex,
+      deviceType: dragData.device,
       message: chassisRequirementMessage(
         dragData.device,
         deviceLibrary,
@@ -419,6 +414,7 @@ export function resolveDropAction(
       targetU,
       deviceHeight: dragData.device.u_height,
       excludeIndex,
+      deviceType: dragData.device,
     };
   }
 
@@ -496,15 +492,17 @@ export function buildCollisionMessage(
   targetU: number,
   excludeIndex?: number,
   faceFilter?: DeviceFace,
+  targetDeviceType?: DeviceType,
 ): string | null {
   if (feedback === "blocked") {
     const collisions: PlacedDevice[] = findCollisions(
       rack,
       deviceLibrary,
       deviceHeight,
-      targetU,
+      toInternalUnits(targetU),
       excludeIndex,
       faceFilter,
+      targetDeviceType,
     );
 
     if (collisions.length > 0) {
@@ -515,7 +513,7 @@ export function buildCollisionMessage(
         ? `Position blocked by ${blockingNames[0]}`
         : `Position blocked by ${blockingNames.join(", ")}`;
     }
-    return null;
+    return "Device doesn't fit this rack's width or depth";
   }
 
   if (feedback === "invalid") {

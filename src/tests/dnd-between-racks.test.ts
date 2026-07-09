@@ -508,6 +508,135 @@ describe("DnD Between Racks", () => {
       expect(movedChild).toBeDefined();
     });
 
+    it("rejects moving a deep container assembly into a shallow rack", () => {
+      const containerType = createTestContainerType({
+        slug: "deep-shelf",
+        u_height: 1,
+        is_full_depth: false,
+        slots: [
+          {
+            id: "main",
+            position: { row: 0, col: 0 },
+            width_fraction: 1,
+            height_units: 1,
+          },
+        ],
+      });
+      const childType: DeviceType = {
+        ...createTestDeviceType({
+          slug: "deep-child",
+          u_height: 1,
+          slot_width: 2,
+          is_full_depth: false,
+        }),
+        custom_fields: {
+          rackula_fit: {
+            dimensions_mm: { width: 200, depth: 300, height: 40 },
+          },
+        },
+      };
+      store.addDeviceTypeRaw(containerType);
+      store.addDeviceTypeRaw(childType);
+      store.updateRack(rackA.id, { depth_mm: 1000 });
+      store.updateRack(rackB.id, { depth_mm: 260 });
+      expect(store.placeDevice(rackA.id, containerType.slug, 5)).toBe(true);
+      const container = store.getRackById(rackA.id)!.devices[0]!;
+      expect(
+        store.placeInContainer(
+          rackA.id,
+          childType.slug,
+          container.id,
+          "main",
+          0,
+        ),
+      ).toBe(true);
+
+      const result = store.moveDeviceToRack(rackA.id, 0, rackB.id, 10, "front");
+
+      expect(result).toBe(false);
+      expect(findDevice(store.getRackById(rackA.id)!, containerType.slug)).toBe(
+        container,
+      );
+      expect(
+        findDevice(store.getRackById(rackB.id)!, containerType.slug),
+      ).toBeUndefined();
+    });
+
+    it.each([
+      {
+        name: "rack-width-incompatible",
+        rackWidths: [19] as DeviceType["rack_widths"],
+        widthMm: 100,
+      },
+      {
+        name: "physically over-wide",
+        rackWidths: [10, 19] as DeviceType["rack_widths"],
+        widthMm: 300,
+      },
+    ])(
+      "rejects moving an assembly with a $name child",
+      ({ rackWidths, widthMm }) => {
+        const containerType = createTestContainerType({
+          slug: `portable-tray-${widthMm}`,
+          u_height: 1,
+          rack_widths: [10, 19],
+          is_full_depth: false,
+          slots: [
+            {
+              id: "main",
+              position: { row: 0, col: 0 },
+              width_fraction: 1,
+              height_units: 1,
+            },
+          ],
+        });
+        const childType: DeviceType = {
+          ...createTestDeviceType({
+            slug: `portable-child-${widthMm}-${rackWidths?.join("-")}`,
+            u_height: 1,
+            slot_width: 2,
+            rack_widths: rackWidths,
+            is_full_depth: false,
+          }),
+          custom_fields: {
+            rackula_fit: {
+              dimensions_mm: { width: widthMm, depth: 100, height: 40 },
+            },
+          },
+        };
+        store.addDeviceTypeRaw(containerType);
+        store.addDeviceTypeRaw(childType);
+        store.updateRack(rackB.id, { width: 10 });
+        expect(store.placeDevice(rackA.id, containerType.slug, 5)).toBe(true);
+        const container = store.getRackById(rackA.id)!.devices[0]!;
+        expect(
+          store.placeInContainer(
+            rackA.id,
+            childType.slug,
+            container.id,
+            "main",
+            0,
+          ),
+        ).toBe(true);
+
+        const result = store.moveDeviceToRack(
+          rackA.id,
+          0,
+          rackB.id,
+          10,
+          "front",
+        );
+
+        expect(result).toBe(false);
+        expect(
+          findDevice(store.getRackById(rackA.id)!, containerType.slug),
+        ).toBe(container);
+        expect(
+          findDevice(store.getRackById(rackB.id)!, containerType.slug),
+        ).toBeUndefined();
+      },
+    );
+
     /**
      * Place a container in rack A with a child device inside its slot.
      *

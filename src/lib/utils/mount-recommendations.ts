@@ -11,10 +11,7 @@ export interface MountRecommendation {
 
 const DEFAULT_RECOMMENDATIONS: Record<string, string[]> = {
   "lenovo-thinkcentre-m720q-tiny": ["deskpi-rackmate-tiny-1u-mount"],
-  "ubiquiti-unifi-cloud-gateway-max": [
-    "deskpi-rackmate-1u-dual-utility-tray",
-    "deskpi-rackmate-1u-utility-tray",
-  ],
+  "ubiquiti-unifi-cloud-gateway-max": ["deskpi-rackmate-1u-utility-tray"],
   "netgear-gs305": [
     "deskpi-rackmate-1u-dual-utility-tray",
     "deskpi-rackmate-1u-utility-tray",

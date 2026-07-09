@@ -20,6 +20,7 @@
     RACKMATE_T1_PLUS_HEIGHT,
     RACKMATE_T1_PLUS_DEPTH_MM,
   } from "$lib/types/constants";
+  import { isRackMateT1Plus } from "$lib/utils/rack-profile";
   import type { Rack } from "$lib/types";
 
   interface Props {
@@ -42,7 +43,7 @@
   // Check if this rack is part of a bayed group
   const rackGroup = $derived(layoutStore.getRackGroupForRack(rack.id));
   const isBayedRack = $derived(rackGroup?.layout_preset === "bayed");
-  const isRackMateRack = $derived(rack.width === 10);
+  const isRackMateRack = $derived(isRackMateT1Plus(rack));
   const bayCount = $derived(rackGroup?.rack_ids.length ?? 1);
   const heightPresets = $derived(
     isRackMateRack ? MINI_RACK_HEIGHTS : COMMON_RACK_HEIGHTS,

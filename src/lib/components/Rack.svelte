@@ -332,6 +332,7 @@
         position,
         undefined,
         effectiveFaceFilter,
+        placementStore.pendingDevice,
       ),
     };
   });
@@ -579,7 +580,9 @@
         text-anchor="middle"
         role="note"
       >
-        No {faceFilter}-facing or full-depth devices
+        {rack.width === 10
+          ? `${faceFilter === "front" ? "Front" : "Rear"} empty`
+          : `No ${faceFilter}-facing or full-depth devices`}
       </text>
     {/if}
 

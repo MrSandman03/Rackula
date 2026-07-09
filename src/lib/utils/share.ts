@@ -35,6 +35,7 @@ import {
 import { generateId } from "./device";
 import { createDefaultRack } from "./serialization";
 import { toHumanUnits, toInternalUnits } from "./position";
+import { hydrateBuiltInDeviceType } from "./built-in-device";
 
 // =============================================================================
 // Helper Functions
@@ -91,26 +92,38 @@ function convertDevices(devices: PlacedDevice[]): MinimalDevice[] {
  * real slots after a round trip.
  */
 function convertDeviceTypes(dt: MinimalDeviceType[]): DeviceType[] {
-  return dt.map((item) => ({
-    slug: item.s,
-    u_height: item.h,
-    ...(item.mf ? { manufacturer: item.mf } : {}),
-    ...(item.m ? { model: item.m } : {}),
-    colour: item.c,
-    category: ABBREV_TO_CATEGORY[item.x] ?? "other",
-    ...(item.sl
-      ? {
-          slots: item.sl.map((s) => ({
-            id: s.id,
-            position: { row: s.r, col: s.cl },
-            ...(s.wf !== undefined ? { width_fraction: s.wf } : {}),
-            ...(s.hu !== undefined ? { height_units: s.hu } : {}),
-          })),
-        }
-      : {}),
-    ...(item.sw !== undefined ? { slot_width: item.sw } : {}),
-    ...(item.sr ? { subdevice_role: item.sr } : {}),
-  }));
+  return dt.map((item) =>
+    hydrateBuiltInDeviceType({
+      slug: item.s,
+      u_height: item.h,
+      ...(item.mf ? { manufacturer: item.mf } : {}),
+      ...(item.m ? { model: item.m } : {}),
+      colour: item.c,
+      category: ABBREV_TO_CATEGORY[item.x] ?? "other",
+      ...(item.sl
+        ? {
+            slots: item.sl.map((s) => ({
+              id: s.id,
+              position: { row: s.r, col: s.cl },
+              ...(s.wf !== undefined ? { width_fraction: s.wf } : {}),
+              ...(s.hu !== undefined ? { height_units: s.hu } : {}),
+              ...(s.a
+                ? {
+                    accepts: s.a.map(
+                      (category) => ABBREV_TO_CATEGORY[category] ?? "other",
+                    ),
+                  }
+                : {}),
+            })),
+          }
+        : {}),
+      ...(item.sw !== undefined ? { slot_width: item.sw } : {}),
+      ...(item.sr ? { subdevice_role: item.sr } : {}),
+      ...(item.rw ? { rack_widths: item.rw } : {}),
+      ...(item.fd !== undefined ? { is_full_depth: item.fd } : {}),
+      ...(item.rf ? { custom_fields: { rackula_fit: item.rf } } : {}),
+    }),
+  );
 }
 
 /**
@@ -219,6 +232,13 @@ export function toMinimalLayout(layout: Layout): MinimalLayoutV2 {
                 ? { wf: s.width_fraction }
                 : {}),
               ...(s.height_units !== undefined ? { hu: s.height_units } : {}),
+              ...(s.accepts && s.accepts.length > 0
+                ? {
+                    a: s.accepts.map(
+                      (category) => CATEGORY_TO_ABBREV[category],
+                    ),
+                  }
+                : {}),
             })),
           }
         : {}),
@@ -226,6 +246,13 @@ export function toMinimalLayout(layout: Layout): MinimalLayoutV2 {
         ? { sw: deviceType.slot_width }
         : {}),
       ...(deviceType.subdevice_role ? { sr: deviceType.subdevice_role } : {}),
+      ...(deviceType.rack_widths ? { rw: deviceType.rack_widths } : {}),
+      ...(deviceType.is_full_depth !== undefined
+        ? { fd: deviceType.is_full_depth }
+        : {}),
+      ...(deviceType.custom_fields?.rackula_fit
+        ? { rf: deviceType.custom_fields.rackula_fit }
+        : {}),
     }));
 
   // Convert all racks to MinimalRackV2
@@ -234,6 +261,10 @@ export function toMinimalLayout(layout: Layout): MinimalLayoutV2 {
     n: rack.name,
     h: rack.height,
     w: normalizeRackWidth(rack.width),
+    ...(rack.profile ? { pf: rack.profile } : {}),
+    ...(!rack.profile && rack.depth_mm !== undefined
+      ? { dp: rack.depth_mm }
+      : {}),
     d: convertDevices(rack.devices),
   }));
 
@@ -283,7 +314,11 @@ function fromMinimalLayoutV1(minimal: MinimalLayout): Layout {
     1,
     true,
     generateId(),
+    minimal.r.pf,
   );
+  if (!minimal.r.pf && minimal.r.dp !== undefined) {
+    rack.depth_mm = minimal.r.dp;
+  }
   rack.devices = devices;
 
   return {
@@ -320,7 +355,11 @@ function fromMinimalLayoutV2(minimal: MinimalLayoutV2): Layout {
       1,
       true,
       rackId,
+      minRack.pf,
     );
+    if (!minRack.pf && minRack.dp !== undefined) {
+      rack.depth_mm = minRack.dp;
+    }
     rack.devices = convertMinimalDevices(minRack.d);
     return rack;
   });

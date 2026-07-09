@@ -22,6 +22,7 @@ export {
 export {
   dragDeviceToRack,
   paletteItemByName,
+  paletteSelectButtonByName,
   selectDevice,
   deselectDevice,
   deleteSelectedDevice,
