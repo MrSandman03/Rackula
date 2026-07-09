@@ -19,6 +19,7 @@ import {
   allowsFractionalRailPosition,
   canMoveRackAssemblyToRack,
   findCollisions,
+  resolveSynthesizedCarrierPlacement,
   synthesizeCarrierForDevice,
   requiresChassisBay,
 } from "$lib/utils/collision";
@@ -253,11 +254,11 @@ export function resolveDropTarget(
   if (resolvableContainerTarget) {
     feedback = "valid";
   } else if (carrierSlug) {
-    // Synthesise a rail carrier at this U: validate its full rail footprint.
+    // Synthesise a rail carrier at this U and validate the complete assembly.
     const carrierType = findDeviceType(carrierSlug, deviceLibrary);
     const carrierHeight = carrierType?.u_height ?? 1;
     previewHeight = carrierHeight;
-    feedback = getDropFeedback(
+    const carrierFeedback = getDropFeedback(
       rack,
       deviceLibrary,
       carrierHeight,
@@ -266,6 +267,21 @@ export function resolveDropTarget(
       "both",
       carrierType,
     );
+    const carrierPlacement =
+      carrierFeedback === "valid" && carrierType
+        ? resolveSynthesizedCarrierPlacement(
+            rack,
+            deviceLibrary,
+            device,
+            carrierType,
+            toInternalUnits(targetU),
+            excludeIndex,
+          )
+        : null;
+    feedback =
+      carrierFeedback === "valid" && !carrierPlacement
+        ? "blocked"
+        : carrierFeedback;
   } else if (needsBay) {
     // Requires a chassis bay but none is under the cursor: honestly invalid.
     feedback = "invalid";
@@ -400,6 +416,27 @@ export function resolveDropAction(
         deviceHeight: carrierHeight,
         excludeIndex,
         deviceType: carrierType,
+      };
+    }
+    const carrierPlacement = carrierType
+      ? resolveSynthesizedCarrierPlacement(
+          rack,
+          deviceLibrary,
+          dragData.device,
+          carrierType,
+          toInternalUnits(targetU),
+          excludeIndex,
+        )
+      : null;
+    if (!carrierPlacement) {
+      return {
+        kind: "invalid",
+        feedback: "blocked",
+        targetU,
+        deviceHeight: carrierHeight,
+        excludeIndex,
+        deviceType: dragData.device,
+        message: "Device and carrier don't fit this rack",
       };
     }
     return {

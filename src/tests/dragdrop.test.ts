@@ -570,6 +570,35 @@ describe("Drag and Drop Utilities", () => {
       expect(target).toBeNull();
     });
 
+    it("never offers another container as a child drop target", () => {
+      const target = detectContainerDropTarget(
+        rackWithCarrier(),
+        deviceLibrary,
+        carrier2x2,
+        170,
+        40,
+        RACK_WIDTH,
+        12,
+        U_HEIGHT,
+      );
+      const hover = detectContainerHover(
+        rackWithCarrier(),
+        deviceLibrary,
+        carrier2x2,
+        170,
+        40,
+        RACK_WIDTH,
+        12,
+        U_HEIGHT,
+      );
+
+      expect(target).toBeNull();
+      expect(hover).toMatchObject({
+        containerId: "carrier-1",
+        isValidTarget: false,
+      });
+    });
+
     it("returns null when no container sits at the target U", () => {
       const emptyRack: Rack = {
         name: "Test Rack",

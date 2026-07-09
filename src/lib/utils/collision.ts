@@ -682,6 +682,57 @@ export function findNextFreeChildPosition(
 }
 
 /**
+ * Resolve a new carrier plus child placement as one physical assembly.
+ * Preview, keyboard placement, and store commit share this plan so child fit
+ * and depth cannot fail only after the UI advertised an available rail slot.
+ */
+export function resolveSynthesizedCarrierPlacement(
+  rack: Rack,
+  deviceLibrary: DeviceType[],
+  childType: DeviceType,
+  carrierType: DeviceType,
+  targetPosition: number,
+  excludeIndex?: number,
+): { slotId: string; position: number } | null {
+  if (!isDeviceCompatibleWithRackWidth(childType, rack.width)) return null;
+
+  const carrierDepth = getDeviceDepthMm(carrierType);
+  const childDepth = getDeviceDepthMm(childType);
+  const assemblyDepth =
+    carrierDepth === undefined
+      ? childDepth
+      : childDepth === undefined
+        ? carrierDepth
+        : Math.max(carrierDepth, childDepth);
+
+  if (
+    !canPlaceDevice(
+      rack,
+      deviceLibrary,
+      carrierType.u_height,
+      targetPosition,
+      excludeIndex,
+      "both",
+      undefined,
+      carrierType,
+      assemblyDepth,
+    )
+  ) {
+    return null;
+  }
+
+  const fittingSlots = (carrierType.slots ?? []).filter((slot) =>
+    canPlaceInSlot(childType, slot, {
+      rackWidth: rack.width,
+      containerHeightUnits: carrierType.u_height,
+      containerSlots: carrierType.slots,
+    }),
+  );
+
+  return findNextFreeChildPosition({ ...carrierType, slots: fittingSlots }, []);
+}
+
+/**
  * The next cell a contained child can move to within its own carrier, scanning
  * forward from the child's current slot and wrapping around. Skips cells the
  * child does not fit (width/height/category) and cells already taken by a
@@ -763,6 +814,10 @@ export function canPlaceInContainer(
   targetPosition: number,
   excludeDeviceId?: string,
 ): boolean {
+  // Nested containers are not supported by the layout schema. Reject them at
+  // the placement chokepoint so drag/drop cannot strand an existing assembly.
+  if (childType.slots?.length) return false;
+
   // Position must be >= 0 (0-indexed within container)
   if (targetPosition < 0) {
     return false;

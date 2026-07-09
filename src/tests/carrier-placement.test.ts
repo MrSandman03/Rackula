@@ -257,7 +257,6 @@ describe("placeDeviceSmart (store carrier-first flow)", () => {
         slug: "deep-half-width",
         u_height: 0.5,
         slot_width: 1,
-        rack_widths: [19],
         is_full_depth: false,
       }),
       custom_fields: {

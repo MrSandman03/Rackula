@@ -15,7 +15,13 @@
 
 import type { Rack, DeviceType, DeviceFace } from "$lib/types";
 import { getDropFeedback } from "./dragdrop";
-import { requiresChassisBay } from "./collision";
+import {
+  requiresChassisBay,
+  resolveSynthesizedCarrierPlacement,
+  synthesizeCarrierForDevice,
+} from "./collision";
+import { findDeviceType } from "./device-lookup";
+import { toInternalUnits } from "./position";
 
 /**
  * Whole-U start positions (1-indexed, human units, ascending) where `device`
@@ -33,6 +39,29 @@ export function validStartPositions(
   // half-width device with no rail carrier) has no valid rail start position:
   // announcing one would be dishonest and Enter would fail (#2854).
   if (requiresChassisBay(device, rack.width)) return [];
+
+  const carrierSlug = synthesizeCarrierForDevice(device, rack.width);
+  if (carrierSlug) {
+    const carrierType = findDeviceType(carrierSlug, deviceLibrary);
+    if (!carrierType) return [];
+
+    const positions: number[] = [];
+    const lastStart = rack.height - carrierType.u_height + 1;
+    for (let startU = 1; startU <= lastStart; startU++) {
+      if (
+        resolveSynthesizedCarrierPlacement(
+          rack,
+          deviceLibrary,
+          device,
+          carrierType,
+          toInternalUnits(startU),
+        )
+      ) {
+        positions.push(startU);
+      }
+    }
+    return positions;
+  }
 
   const positions: number[] = [];
   const deviceHeight = device.u_height;

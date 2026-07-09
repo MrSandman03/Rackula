@@ -445,6 +445,33 @@ describe("DnD Between Racks", () => {
         message: "Device assembly doesn't fit this rack",
       });
     });
+
+    it("does not nest a moved carrier inside a target carrier", () => {
+      const occupiedTarget: Rack = {
+        ...shallowTarget,
+        depth_mm: 1000,
+        devices: [pd("target-carrier", carrier.slug, 3, "front")],
+      };
+
+      const action = resolveDropAction(
+        coords,
+        dims,
+        occupiedTarget,
+        library,
+        dragData,
+        "front",
+        false,
+        sourceRack,
+      );
+
+      expect(action.kind).toBe("invalid");
+      expect(action.kind).not.toBe("container-drop");
+      expect(sourceRack.devices.map((device) => device.id)).toEqual([
+        "carrier",
+        "deep-child",
+      ]);
+      expect(sourceRack.devices[1]?.container_id).toBe("carrier");
+    });
   });
 
   describe("Cross-rack move execution", () => {

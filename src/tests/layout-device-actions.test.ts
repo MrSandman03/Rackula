@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { getLayoutStore, resetLayoutStore } from "$lib/stores/layout.svelte";
 import { toInternalUnits } from "$lib/utils/position";
+import { LayoutSchema } from "$lib/schemas";
 import {
   setupStoreWithDevice,
   createTestDevice,
@@ -291,6 +292,90 @@ describe("Layout Store", () => {
 
       store.removeDeviceFromRack(rack!.id, 0);
       expect(store.isDirty).toBe(true);
+    });
+
+    it("removes an occupied carrier atomically and restores exact order on undo", () => {
+      const store = getLayoutStore();
+      const rack = store.addRack("Test Rack", 12)!;
+      const railType = store.addDeviceType(
+        createTestDeviceTypeInput({
+          name: "Rail Device",
+          u_height: 1,
+          category: "network",
+          colour: "#4A90D9",
+        }),
+      );
+      const carrierType = store.addDeviceType(
+        createTestDeviceTypeInput({
+          name: "Carrier",
+          u_height: 1,
+          category: "shelf",
+          colour: "#8B4513",
+          slots: [
+            {
+              id: "left",
+              position: { row: 0, col: 0 },
+              width_fraction: 0.5,
+              height_units: 1,
+            },
+            {
+              id: "right",
+              position: { row: 0, col: 1 },
+              width_fraction: 0.5,
+              height_units: 1,
+            },
+          ],
+        }),
+      );
+      const childType = store.addDeviceType(
+        createTestDeviceTypeInput({
+          name: "Contained Device",
+          u_height: 1,
+          category: "server",
+          colour: "#336699",
+          slot_width: 1,
+          is_full_depth: false,
+        }),
+      );
+
+      store.placeDevice(rack.id, railType.slug, 1);
+      store.placeDevice(rack.id, carrierType.slug, 4);
+      const carrier = store.rack.devices[1]!;
+      expect(
+        store.placeInContainer(rack.id, childType.slug, carrier.id, "left", 0),
+      ).toBe(true);
+      expect(
+        store.placeInContainer(rack.id, childType.slug, carrier.id, "right", 0),
+      ).toBe(true);
+      store.placeDevice(rack.id, railType.slug, 8);
+
+      const before = JSON.parse(
+        JSON.stringify(store.rack.devices),
+      ) as typeof store.rack.devices;
+      const survivingIds = [before[0]!.id, before[4]!.id];
+      store.clearHistory();
+
+      store.removeDeviceFromRack(rack.id, 1);
+
+      expect(store.rack.devices.map((device) => device.id)).toEqual(
+        survivingIds,
+      );
+      expect(LayoutSchema.safeParse(store.layout).success).toBe(true);
+      expect(store.canUndo).toBe(true);
+
+      store.undo();
+
+      expect(store.rack.devices).toEqual(before);
+      expect(LayoutSchema.safeParse(store.layout).success).toBe(true);
+      expect(store.canUndo).toBe(false);
+      expect(store.canRedo).toBe(true);
+
+      store.redo();
+
+      expect(store.rack.devices.map((device) => device.id)).toEqual(
+        survivingIds,
+      );
+      expect(LayoutSchema.safeParse(store.layout).success).toBe(true);
     });
   });
 

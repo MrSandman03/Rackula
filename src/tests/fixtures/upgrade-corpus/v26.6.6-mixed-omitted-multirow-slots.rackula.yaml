@@ -1,0 +1,60 @@
+metadata:
+  id: 99999999-9999-4999-8999-999999999999
+  name: Mixed Omitted Multirow Slots
+  schema_version: "1.0"
+version: "26.6.6"
+name: Mixed Omitted Multirow Slots
+racks:
+  - id: rack-mixed
+    name: Mixed Slot Rack
+    height: 8
+    width: 19
+    depth_mm: 1000
+    desc_units: false
+    show_rear: true
+    form_factor: 4-post-cabinet
+    starting_unit: 1
+    position: 0
+    devices:
+      - id: legacy-mixed-container
+        device_type: legacy-mixed-container-type
+        position: 6
+        face: front
+      - id: legacy-mixed-child
+        device_type: legacy-mixed-child-type
+        position: 0
+        face: front
+        container_id: legacy-mixed-container
+        slot_id: omitted-bottom
+device_types:
+  - slug: legacy-mixed-container-type
+    model: Legacy Mixed Container
+    u_height: 2
+    rack_widths: [19]
+    is_full_depth: false
+    colour: "#425466"
+    category: chassis
+    subdevice_role: parent
+    slots:
+      - id: omitted-bottom
+        position:
+          row: 0
+          col: 0
+        width_fraction: 1
+      - id: explicit-top
+        position:
+          row: 1
+          col: 0
+        width_fraction: 1
+        height_units: 1
+  - slug: legacy-mixed-child-type
+    model: Legacy Two U Mixed Child
+    u_height: 2
+    rack_widths: [19]
+    is_full_depth: false
+    colour: "#657789"
+    category: server
+    subdevice_role: child
+settings:
+  display_mode: label
+  show_labels_on_images: false

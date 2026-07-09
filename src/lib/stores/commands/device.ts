@@ -4,6 +4,7 @@
 
 import type { Command } from "./types";
 import type { PlacedDevice, DeviceFace } from "$lib/types";
+import type { RackCommandStore } from "./rack";
 import { getImageStore } from "../images.svelte";
 import { placementKey } from "$lib/utils/placement-key";
 
@@ -211,6 +212,72 @@ export function createRemoveDeviceCommand(
           imgStore.setDeviceImage(actualKey, "front", snapshotCopy.front);
         if (snapshotCopy.rear)
           imgStore.setDeviceImage(actualKey, "rear", snapshotCopy.rear);
+      }
+    },
+  };
+}
+
+/** Store surface needed to replace an occupied carrier and its direct children. */
+export type DeviceAssemblyCommandStore = Pick<
+  RackCommandStore,
+  "restoreRackDevicesRaw"
+>;
+
+/**
+ * Remove an occupied carrier as one exact, undoable device-roster transition.
+ * Replacing the complete roster preserves the original array indices and
+ * parent/child linkage on undo instead of appending restored devices at the end.
+ */
+export function createRemoveDeviceAssemblyCommand(
+  beforeDevices: PlacedDevice[],
+  afterDevices: PlacedDevice[],
+  removedDevices: PlacedDevice[],
+  store: DeviceAssemblyCommandStore,
+  deviceName: string = "device",
+  layoutId: string = "",
+): Command {
+  const beforeCopy = structuredClone(beforeDevices);
+  const afterCopy = structuredClone(afterDevices);
+  const removedCopies = structuredClone(removedDevices);
+  const imageSnapshots = removedCopies.map((device) => {
+    const snapshot = getImageStore()
+      .getAllImages()
+      .get(placementKey(layoutId, device.id));
+    return {
+      deviceId: device.id,
+      images: snapshot ? structuredClone(snapshot) : undefined,
+    };
+  });
+
+  return {
+    type: "REMOVE_DEVICE",
+    description: `Remove ${deviceName}`,
+    timestamp: Date.now(),
+    execute() {
+      store.restoreRackDevicesRaw(structuredClone(afterCopy));
+      const imageStore = getImageStore();
+      for (const device of removedCopies) {
+        imageStore.removeAllDeviceImages(placementKey(layoutId, device.id));
+      }
+    },
+    undo() {
+      store.restoreRackDevicesRaw(structuredClone(beforeCopy));
+      const imageStore = getImageStore();
+      for (const snapshot of imageSnapshots) {
+        if (snapshot.images?.front) {
+          imageStore.setDeviceImage(
+            placementKey(layoutId, snapshot.deviceId),
+            "front",
+            snapshot.images.front,
+          );
+        }
+        if (snapshot.images?.rear) {
+          imageStore.setDeviceImage(
+            placementKey(layoutId, snapshot.deviceId),
+            "rear",
+            snapshot.images.rear,
+          );
+        }
       }
     },
   };

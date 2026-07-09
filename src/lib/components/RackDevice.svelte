@@ -415,6 +415,15 @@
     }
   }
 
+  // Assistive technology and programmatic activation dispatch click with
+  // detail=0. Physical mouse/touch taps are selected by handlePointerUp; ignore
+  // their follow-up click so one tap cannot emit the selection twice.
+  function handleDeviceClick(event: MouseEvent) {
+    event.stopPropagation();
+    if (event.detail !== 0) return;
+    emitSelection(placedDeviceId, device.slug, position);
+  }
+
   function handleChildClick(
     event: MouseEvent,
     child: PlacedDevice,
@@ -696,7 +705,7 @@
     tabindex="0"
     aria-label={ariaLabel}
     aria-pressed={selected}
-    onclick={(event) => event.stopPropagation()}
+    onclick={handleDeviceClick}
     onkeydown={handleKeyDown}
     onpointerdown={handlePointerDown}
     onpointermove={handlePointerMove}

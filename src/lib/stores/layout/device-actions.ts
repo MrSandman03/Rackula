@@ -12,7 +12,6 @@
 import type { DeviceFace, PlacedDevice } from "$lib/types";
 import { UNITS_PER_U } from "$lib/types/constants";
 import {
-  canPlaceDevice,
   canPlaceInContainer,
   canPlaceInSlot,
   canMoveRackAssemblyToRack,
@@ -20,6 +19,7 @@ import {
   findNextFreeChildPosition,
   findNextSlotForChild,
   isContainerChild,
+  resolveSynthesizedCarrierPlacement,
   synthesizeCarrierForDevice,
 } from "$lib/utils/collision";
 import { findDeviceType as findDeviceTypeInArray } from "$lib/stores/layout-helpers";
@@ -28,7 +28,6 @@ import { isDeviceCompatibleWithRackWidth } from "$lib/utils/deviceFilters";
 import { generateId } from "$lib/utils/device";
 import { toInternalUnits } from "$lib/utils/position";
 import { instantiatePorts } from "$lib/utils/port-utils";
-import { getDeviceDepthMm } from "$lib/utils/slot-fit";
 import {
   createPlaceDeviceCommand,
   createAddDeviceTypeCommand,
@@ -409,45 +408,12 @@ export function placeDeviceSmart(
   // Synthesise a new carrier and place the child inside it.
   const carrierType = findDeviceType(carrierSlug, layout.device_types);
   if (!carrierType) return false;
-  const carrierDepth = getDeviceDepthMm(carrierType);
-  const childDepth = getDeviceDepthMm(deviceType);
-  const assemblyDepth =
-    carrierDepth === undefined
-      ? childDepth
-      : childDepth === undefined
-        ? carrierDepth
-        : Math.max(carrierDepth, childDepth);
-
-  // Carriers are whole-U full-width: validate the rail slot is free.
-  if (
-    !canPlaceDevice(
-      targetRack,
-      layout.device_types,
-      carrierType.u_height,
-      positionInternal,
-      undefined,
-      "both",
-      undefined,
-      carrierType,
-      assemblyDepth,
-    )
-  ) {
-    return false;
-  }
-
-  // Only place into a cell the child actually fits. The carrier mapping
-  // guarantees a fit for the standard sizes; reject odd dimensions rather than
-  // commit an invalid placement.
-  const fittingSlots = (carrierType.slots ?? []).filter((slot) =>
-    canPlaceInSlot(deviceType, slot, {
-      rackWidth: targetRack.width,
-      containerHeightUnits: carrierType.u_height,
-      containerSlots: carrierType.slots,
-    }),
-  );
-  const free = findNextFreeChildPosition(
-    { ...carrierType, slots: fittingSlots },
-    [],
+  const free = resolveSynthesizedCarrierPlacement(
+    targetRack,
+    layout.device_types,
+    deviceType,
+    carrierType,
+    positionInternal,
   );
   if (!free) return false;
 

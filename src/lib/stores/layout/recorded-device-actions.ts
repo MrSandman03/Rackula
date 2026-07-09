@@ -23,6 +23,7 @@ import {
   createPlaceDeviceCommand,
   createMoveDeviceCommand,
   createRemoveDeviceCommand,
+  createRemoveDeviceAssemblyCommand,
   createUpdateDeviceFaceCommand,
   createUpdateDeviceNameCommand,
   createUpdateDevicePlacementImageCommand,
@@ -36,6 +37,7 @@ import {
 import type { LayoutStateAccess } from "./types";
 import { getCommandStoreAdapter } from "./command-adapters";
 import { getRackById } from "./rack-actions";
+import { bindCommandToRack } from "./recorded-rack-actions";
 
 /**
  * Check if a device type needs auto-importing from starter/brand packs.
@@ -409,9 +411,13 @@ export function removeDeviceRecorded(
   // Set active rack so Raw functions target the correct rack
   ctx.setActiveRackId(rackId);
 
-  // Get a snapshot to convert from reactive proxy to plain object
-  // structuredClone in the command factory requires a plain object
-  const device = snapshotDevice(targetRack.devices[deviceIndex]!);
+  // Get snapshots to convert reactive proxies to plain objects. An occupied
+  // carrier is removed with every direct child as one exact roster transition.
+  const beforeDevices = targetRack.devices.map(snapshotDevice);
+  const device = beforeDevices[deviceIndex]!;
+  const children = beforeDevices.filter(
+    (candidate) => candidate.container_id === device.id,
+  );
   const layout = ctx.getLayout();
   const deviceType = findDeviceTypeInArray(
     layout.device_types,
@@ -422,13 +428,27 @@ export function removeDeviceRecorded(
   const history = ctx.getHistory();
   const adapter = getCommandStoreAdapter(ctx);
 
-  const command = createRemoveDeviceCommand(
-    device,
-    adapter,
-    deviceName,
-    layout.metadata?.id ?? "",
-  );
-  history.execute(command);
+  const command =
+    children.length > 0
+      ? createRemoveDeviceAssemblyCommand(
+          beforeDevices,
+          beforeDevices.filter(
+            (candidate) =>
+              candidate.id !== device.id &&
+              candidate.container_id !== device.id,
+          ),
+          [device, ...children],
+          adapter,
+          deviceName,
+          layout.metadata?.id ?? "",
+        )
+      : createRemoveDeviceCommand(
+          device,
+          adapter,
+          deviceName,
+          layout.metadata?.id ?? "",
+        );
+  history.execute(bindCommandToRack(ctx, rackId, command));
   ctx.markDirty();
 }
 

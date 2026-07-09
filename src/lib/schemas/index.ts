@@ -4,6 +4,7 @@
  */
 
 import { z } from "../zod";
+import type { RefinementCtx } from "zod";
 import { nanoid } from "nanoid";
 import { UNITS_PER_U, DEFAULT_RACK_BASE_WEIGHT } from "$lib/types/constants";
 import { VERSION } from "$lib/version";
@@ -50,23 +51,15 @@ const HEX_COLOUR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
 /**
  * Prior releases treated every omitted-height slot as the full container
- * height, even in a multi-row grid. Keep that interpretation only while
- * validating saved layouts that have the exact legacy all-omitted signature;
- * runtime placement and geometry continue to use the corrected row heights.
+ * height, including mixed explicit/omitted grids. Keep that interpretation
+ * only while validating children already present in a saved layout; runtime
+ * placement and geometry continue to use the corrected row heights.
  */
-function slotForPriorReleaseAllOmittedRowsLayoutValidation(
+function slotForPriorReleaseOmittedHeightLayoutValidation(
   slot: Slot,
   containerType: Pick<DeviceType, "u_height" | "slots">,
 ): Slot {
-  const slots = containerType.slots;
-  if (
-    slot.height_units !== undefined ||
-    !slots?.length ||
-    slots.some((candidate) => candidate.height_units !== undefined) ||
-    new Set(slots.map((candidate) => candidate.position.row)).size <= 1
-  ) {
-    return slot;
-  }
+  if (slot.height_units !== undefined) return slot;
 
   return { ...slot, height_units: containerType.u_height };
 }
@@ -511,7 +504,7 @@ export const CableSchema = z
  * Device Type schema - library template definition
  * Schema v1.0.0: Flat structure with NetBox-compatible fields
  */
-export const DeviceTypeSchema = z
+const DeviceTypeSchemaBase = z
   .object({
     // --- Core Identity ---
     slug: SlugSchema,
@@ -575,43 +568,75 @@ export const DeviceTypeSchema = z
      */
     slots: z.array(SlotSchema).optional(),
   })
-  .passthrough()
-  .superRefine((data, ctx) => {
-    if (data.slots && data.slots.length > 0) {
-      for (const issue of validateSlotTopology(data.slots, data.u_height)) {
-        const slotIndex =
-          issue.slotId !== undefined
-            ? data.slots.findIndex((slot) => slot.id === issue.slotId)
-            : -1;
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: issue.message,
-          path: slotIndex >= 0 ? ["slots", slotIndex] : ["slots"],
-        });
-      }
-    }
+  .passthrough();
 
-    // Half-depth devices have one physical face; interfaces cannot span both.
-    // Unspecified position defaults to 'front', so implicit-front + explicit-rear is also invalid.
-    if (
-      data.is_full_depth === false &&
-      data.interfaces &&
-      data.interfaces.length > 0
-    ) {
-      const positions = data.interfaces.map(
-        (iface: { position?: string }) => iface.position ?? "front",
-      );
-      const uniquePositions = new Set(positions);
-      if (uniquePositions.size > 1) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message:
-            "Half-depth device cannot have interfaces on both front and rear faces",
-          path: ["interfaces"],
-        });
+function addDeviceTypeRefinementIssues(
+  data: z.infer<typeof DeviceTypeSchemaBase>,
+  ctx: RefinementCtx,
+  allowPriorReleaseMultirowHeightOverflow: boolean,
+): void {
+  if (data.slots && data.slots.length > 0) {
+    const hasMultipleRows =
+      new Set(data.slots.map((slot) => slot.position.row)).size > 1;
+    for (const issue of validateSlotTopology(data.slots, data.u_height)) {
+      // Height accounting was added after saved layouts could already contain
+      // multirow explicit grids whose rows exceed the container. Only the
+      // saved-layout boundary waives that one topology issue; authoring/import
+      // through DeviceTypeSchema remains strict, as do all other topology rules.
+      if (
+        allowPriorReleaseMultirowHeightOverflow &&
+        hasMultipleRows &&
+        issue.code === "height_overflow"
+      ) {
+        continue;
       }
+
+      const slotIndex =
+        issue.slotId !== undefined
+          ? data.slots.findIndex((slot) => slot.id === issue.slotId)
+          : -1;
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: issue.message,
+        path: slotIndex >= 0 ? ["slots", slotIndex] : ["slots"],
+      });
     }
-  });
+  }
+
+  // Half-depth devices have one physical face; interfaces cannot span both.
+  // Unspecified position defaults to 'front', so implicit-front + explicit-rear is also invalid.
+  if (
+    data.is_full_depth === false &&
+    data.interfaces &&
+    data.interfaces.length > 0
+  ) {
+    const positions = data.interfaces.map(
+      (iface: { position?: string }) => iface.position ?? "front",
+    );
+    const uniquePositions = new Set(positions);
+    if (uniquePositions.size > 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "Half-depth device cannot have interfaces on both front and rear faces",
+        path: ["interfaces"],
+      });
+    }
+  }
+}
+
+/** Canonical device contract for authoring and standalone device imports. */
+export const DeviceTypeSchema = DeviceTypeSchemaBase.superRefine((data, ctx) =>
+  addDeviceTypeRefinementIssues(data, ctx, false),
+);
+
+/**
+ * Saved layouts predate slot-row height accounting. Keep only that historical
+ * load exception here so the canonical DeviceTypeSchema stays strict.
+ */
+const SavedLayoutDeviceTypeSchema = DeviceTypeSchemaBase.superRefine(
+  (data, ctx) => addDeviceTypeRefinementIssues(data, ctx, true),
+);
 
 /**
  * Placed device schema - instance in rack
@@ -856,7 +881,7 @@ const LayoutSchemaInput = z
     // Legacy format: single rack (optional, converted by transform)
     rack: RackSchemaInput.optional(),
     rack_groups: z.array(RackGroupSchema).optional(),
-    device_types: z.array(DeviceTypeSchema),
+    device_types: z.array(SavedLayoutDeviceTypeSchema),
     settings: LayoutSettingsSchema,
     connections: z.array(ConnectionSchema).optional(),
     /** @deprecated Use connections instead */
@@ -1183,10 +1208,7 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
         // 3b. Child must fit its cell (height_units / width_fraction).
         const slot = slotById.get(device.slot_id)!;
         const slotForLayoutValidation =
-          slotForPriorReleaseAllOmittedRowsLayoutValidation(
-            slot,
-            containerType,
-          );
+          slotForPriorReleaseOmittedHeightLayoutValidation(slot, containerType);
         const childForFit = resolveDeviceType(device.device_type);
         if (childForFit) {
           if (!isDeviceCompatibleWithRackWidth(childForFit, rack.width)) {

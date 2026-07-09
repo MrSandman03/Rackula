@@ -418,6 +418,35 @@ describe("Child devices excluded from rack-level collision", () => {
 // =============================================================================
 
 describe("canPlaceInContainer", () => {
+  it("rejects nesting a container inside another container", () => {
+    const outerType = createTestContainerType({
+      slug: "outer-carrier",
+      u_height: 2,
+    });
+    const nestedType = createTestContainerType({
+      slug: "nested-carrier",
+      u_height: 1,
+    });
+    const outer = createTestDevice({
+      id: "outer",
+      device_type: outerType.slug,
+      position: 5,
+    });
+    const rack = createTestRack({ devices: [outer] });
+
+    expect(
+      canPlaceInContainer(
+        rack,
+        [outerType, nestedType],
+        outer,
+        outerType,
+        nestedType,
+        "slot-left",
+        0,
+      ),
+    ).toBe(false);
+  });
+
   it("allows placing device in empty container slot", () => {
     const containerType = createTestContainerType({
       slug: "blade-chassis",

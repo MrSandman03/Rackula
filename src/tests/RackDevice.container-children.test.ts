@@ -72,8 +72,8 @@ function renderOccupiedCarrier(onselect = vi.fn()) {
 }
 
 describe("RackDevice container children", () => {
-  it("exposes the carrier and child as sibling button controls", async () => {
-    const { childButton, onselect } = renderOccupiedCarrier();
+  it("exposes the carrier and child as sibling button controls", () => {
+    const { childButton } = renderOccupiedCarrier();
     const carrierGroup = screen.getByRole("group", {
       name: "UCG Tray carrier assembly",
     });
@@ -84,9 +84,76 @@ describe("RackDevice container children", () => {
     expect(carrierGroup).toContainElement(carrierButton);
     expect(carrierGroup).toContainElement(childButton);
     expect(carrierButton).not.toContainElement(childButton);
+  });
 
-    await fireEvent.keyDown(carrierButton, { key: "Enter" });
+  it("selects the carrier from an accessibility-style click", async () => {
+    const { onselect } = renderOccupiedCarrier();
+    const carrierButton = screen.getByRole("button", {
+      name: /Test Carrier, 1U shelf at U1/,
+    });
+
+    await fireEvent.click(carrierButton, { detail: 0 });
+
+    expect(onselect).toHaveBeenCalledOnce();
     expect(onselect.mock.calls[0]?.[0].detail.deviceId).toBe("carrier-1");
+  });
+
+  it.each(["Enter", " "])("selects the carrier with %j", async (key) => {
+    const { onselect } = renderOccupiedCarrier();
+    const carrierButton = screen.getByRole("button", {
+      name: /Test Carrier, 1U shelf at U1/,
+    });
+
+    await fireEvent.keyDown(carrierButton, { key });
+
+    expect(onselect).toHaveBeenCalledOnce();
+    expect(onselect.mock.calls[0]?.[0].detail.deviceId).toBe("carrier-1");
+  });
+
+  it("emits selection once for a pointer tap followed by click", async () => {
+    const { onselect } = renderOccupiedCarrier();
+    const carrierButton = screen.getByRole("button", {
+      name: /Test Carrier, 1U shelf at U1/,
+    });
+    const pointer = {
+      bubbles: true,
+      isPrimary: true,
+      pointerId: 1,
+      clientX: 20,
+      clientY: 20,
+    };
+
+    carrierButton.dispatchEvent(new PointerEvent("pointerdown", pointer));
+    carrierButton.dispatchEvent(new PointerEvent("pointerup", pointer));
+    await fireEvent.click(carrierButton, { detail: 1 });
+
+    expect(onselect).toHaveBeenCalledOnce();
+    expect(onselect.mock.calls[0]?.[0].detail.deviceId).toBe("carrier-1");
+  });
+
+  it("does not select the carrier when the pointer gesture becomes a drag", async () => {
+    const { onselect } = renderOccupiedCarrier();
+    const carrierButton = screen.getByRole("button", {
+      name: /Test Carrier, 1U shelf at U1/,
+    });
+    const pointer = {
+      bubbles: true,
+      isPrimary: true,
+      pointerId: 1,
+      clientX: 20,
+      clientY: 20,
+    };
+
+    carrierButton.dispatchEvent(new PointerEvent("pointerdown", pointer));
+    carrierButton.dispatchEvent(
+      new PointerEvent("pointermove", { ...pointer, clientX: 40 }),
+    );
+    carrierButton.dispatchEvent(
+      new PointerEvent("pointerup", { ...pointer, clientX: 40 }),
+    );
+    await fireEvent.click(carrierButton, { detail: 1 });
+
+    expect(onselect).not.toHaveBeenCalled();
   });
 
   it("selects a child by pointer and suppresses the occupied carrier label", async () => {

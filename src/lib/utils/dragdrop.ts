@@ -297,6 +297,8 @@ export function detectContainerDropTarget(
   uHeight: number,
   faceFilter?: DeviceFace,
 ): ContainerDropTarget | null {
+  if (draggedDevice.slots?.length) return null;
+
   const targetU = calculateDropPosition(mouseY, rackHeight, uHeight, 0);
 
   for (const container of rack.devices) {
@@ -471,13 +473,14 @@ export function detectContainerHover(
     return {
       containerId: placedDevice.id,
       targetSlotId: slot?.id ?? null,
-      isValidTarget: slot
-        ? canPlaceInSlot(draggedDevice, slot, {
-            rackWidth: rack.width,
-            containerHeightUnits: deviceType.u_height,
-            containerSlots: slots,
-          })
-        : false,
+      isValidTarget:
+        !draggedDevice.slots?.length && slot
+          ? canPlaceInSlot(draggedDevice, slot, {
+              rackWidth: rack.width,
+              containerHeightUnits: deviceType.u_height,
+              containerSlots: slots,
+            })
+          : false,
     };
   }
 
