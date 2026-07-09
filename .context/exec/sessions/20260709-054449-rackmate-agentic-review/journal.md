@@ -14,3 +14,9 @@
 - Fixed RackMate starter render crash by excluding container children from rack-level blocked-slot overlays and deduplicating blocked ranges.
 - Verified with `npm run check`, `npm run lint -- --quiet`, `npm run build`, `git diff --check`, full `npm run test:run`, `npm run test:e2e:smoke`, full Chromium command-palette spec, and production-preview browser sanity.
 - Re-ran the final full gate after cleanup; fresh production preview on port 4185 showed the RackMate starter tab with 13 devices, rendered front/rear devices, no debug attrs, and no page errors.
+
+## 2026-07-09T07:55:36Z
+
+- Closed upstream PR `RackulaLives/Rackula#2904` because the working target is the fork/project side, not upstream.
+- Rewired remotes so `origin` points to `MrSandman03/Rackula` and `upstream` is read-only (`pushurl=DISABLED`).
+- Fast-forwarded fork `main` to `rackmate-agentic-fit`, pushed `origin/main`, and deleted the completed feature branch locally and remotely.
