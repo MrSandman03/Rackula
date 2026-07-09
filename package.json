@@ -6,9 +6,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/RackulaLives/Rackula.git"
+    "url": "git+https://github.com/MrSandman03/Rackula.git"
   },
-  "homepage": "https://github.com/RackulaLives/Rackula",
+  "homepage": "https://github.com/MrSandman03/Rackula",
   "private": true,
   "type": "module",
   "scripts": {
@@ -20,6 +20,7 @@
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "test:e2e:dev": "playwright test --config e2e/playwright.dev.config.ts",
     "test:e2e:smoke": "playwright test --config e2e/playwright.smoke.config.ts",
+    "test:e2e:rackmate": "playwright test --config e2e/playwright.config.ts --project=chromium e2e/command-palette.spec.ts e2e/rackmate.spec.ts",
     "test:e2e:visual": "playwright test --config e2e/playwright.visual.config.ts",
     "test:e2e:visual:update": "playwright test --config e2e/playwright.visual.config.ts --update-snapshots",
     "test:e2e:a11y": "playwright test --config e2e/playwright.a11y.config.ts",

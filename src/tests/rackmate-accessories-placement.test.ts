@@ -83,10 +83,16 @@ describe("RackMate accessory placement", () => {
   it("still treats desktop Ubiquiti compact gateways as tray children", () => {
     const gateway = findBrandDevice("ubiquiti-unifi-cloud-gateway-max")!;
     const tray = findBrandDevice("deskpi-rackmate-1u-utility-tray")!;
+    const dualTray = findBrandDevice("deskpi-rackmate-1u-dual-utility-tray")!;
 
     expect(gateway.subdevice_role).toBe("child");
     expect(gateway.u_height).toBe(0.5);
     expect(requiresChassisBay(gateway, 10)).toBe(true);
-    expect(canPlaceInSlot(gateway, tray.slots![0])).toBe(true);
+    expect(canPlaceInSlot(gateway, tray.slots![0], { rackWidth: 10 })).toBe(
+      true,
+    );
+    expect(canPlaceInSlot(gateway, dualTray.slots![0], { rackWidth: 10 })).toBe(
+      false,
+    );
   });
 });

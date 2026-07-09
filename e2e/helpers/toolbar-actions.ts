@@ -25,9 +25,10 @@ export async function runPaletteCommand(
 }
 
 /**
- * Click the "New Rack" button in the sidebar Racks tab. New Rack creates a 24U
- * rack directly on the canvas (#2732); the New Rack wizard was removed in #2747.
- * Switches to the Racks tab if not already selected, then clicks the + button.
+ * Click the "New Rack" button in the sidebar Racks tab. This RackMate fork
+ * creates an 8U, 10-inch rack directly on the canvas (#2732); the New Rack
+ * wizard was removed in #2747. Switches to the Racks tab if not already
+ * selected, then clicks the + button.
  */
 export async function clickNewRack(page: Page): Promise<void> {
   const racksTab = page.getByTestId("sidebar-tab-racks");

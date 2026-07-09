@@ -14,7 +14,7 @@
  * A valid carrier-first layout always serialises without error.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { LayoutSchema } from "$lib/schemas";
+import { DeviceTypeSchema, LayoutSchema } from "$lib/schemas";
 import { getLayoutStore, resetLayoutStore } from "$lib/stores/layout.svelte";
 import { resetHistoryStore } from "$lib/stores/history.svelte";
 import { CATEGORY_COLOURS } from "$lib/types/constants";
@@ -709,6 +709,37 @@ describe("moveDevice store enforcement (carrier-first parity)", () => {
 });
 
 describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => {
+  it("rejects a carrier whose slot row exceeds the container width", () => {
+    const result = DeviceTypeSchema.safeParse({
+      slug: "bad-row-carrier",
+      model: "Bad Row Carrier",
+      u_height: 1,
+      category: "shelf",
+      colour: "#888888",
+      slots: [
+        {
+          id: "left",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+        {
+          id: "right",
+          position: { row: 0, col: 1 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) => /exceeding 1\.00/i.test(i.message)),
+      ).toBe(true);
+    }
+  });
+
   it("rejects a child whose category is not accepted by the slot", () => {
     const restrictedCarrier = {
       slug: "server-only-carrier",
@@ -758,6 +789,153 @@ describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => 
     if (!result.success) {
       expect(
         result.error.issues.some((i) => /not accepted/i.test(i.message)),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects a physically too-wide child even when logical slot_width fits", () => {
+    const dualCarrier = {
+      slug: "rackmate-dual-tray",
+      model: "RackMate Dual Tray",
+      u_height: 1,
+      category: "shelf",
+      colour: "#888888",
+      slots: [
+        {
+          id: "left",
+          position: { row: 0, col: 0 },
+          width_fraction: 0.5,
+          height_units: 1,
+          accepts: ["network"],
+        },
+        {
+          id: "right",
+          position: { row: 0, col: 1 },
+          width_fraction: 0.5,
+          height_units: 1,
+          accepts: ["network"],
+        },
+      ],
+    };
+    const wideNetworkChild = {
+      slug: "wide-network-child",
+      model: "Wide Network Child",
+      u_height: 0.5,
+      slot_width: 1,
+      category: "network",
+      colour: "#4A90D9",
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 141.8, depth: 127.6, height: 30 },
+        },
+      },
+    };
+    const layout = layoutWith(
+      [dualCarrier, wideNetworkChild],
+      [
+        {
+          id: "carrier-1",
+          device_type: "rackmate-dual-tray",
+          position: 30,
+          face: "front" as const,
+        },
+        {
+          id: "child-1",
+          device_type: "wide-network-child",
+          position: 0,
+          face: "front" as const,
+          container_id: "carrier-1",
+          slot_id: "left",
+        },
+      ],
+      10,
+    );
+
+    const result = LayoutSchema.safeParse(layout);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) => /wider than slot/i.test(i.message)),
+      ).toBe(true);
+    }
+  });
+
+  it("rejects a child position that extends outside the selected slot", () => {
+    const carrier = {
+      slug: "one-slot-carrier",
+      model: "One Slot Carrier",
+      u_height: 1,
+      category: "shelf",
+      colour: "#888888",
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+          accepts: ["network"],
+        },
+      ],
+    };
+    const child = {
+      slug: "network-child",
+      model: "Network Child",
+      u_height: 1,
+      category: "network",
+      colour: "#4A90D9",
+    };
+    const layout = layoutWith(
+      [carrier, child],
+      [
+        {
+          id: "carrier-1",
+          device_type: "one-slot-carrier",
+          position: 30,
+          face: "front" as const,
+        },
+        {
+          id: "child-1",
+          device_type: "network-child",
+          position: 1,
+          face: "front" as const,
+          container_id: "carrier-1",
+          slot_id: "main",
+        },
+      ],
+    );
+
+    const result = LayoutSchema.safeParse(layout);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) =>
+          /extends outside slot/i.test(i.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("enforces carrier-first rules for built-in brand types not embedded in the layout", () => {
+    const layout = layoutWith(
+      [],
+      [
+        {
+          id: "tiny-1",
+          device_type: "lenovo-thinkcentre-m720q-tiny",
+          position: 30,
+          face: "front" as const,
+        },
+      ],
+      10,
+    );
+
+    const result = LayoutSchema.safeParse(layout);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) =>
+          /cannot mount directly/i.test(i.message),
+        ),
       ).toBe(true);
     }
   });

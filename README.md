@@ -15,10 +15,9 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-bd93f9?style=for-the-badge&labelColor=44475a" alt="License: MIT"></a>
-  <img src="https://img.shields.io/github/v/release/RackulaLives/Rackula?style=for-the-badge&labelColor=44475a&color=ff79c6" alt="GitHub Release">
-  <a href="https://github.com/RackulaLives/Rackula/pkgs/container/Rackula"><img src="https://img.shields.io/github/v/release/RackulaLives/Rackula?style=for-the-badge&labelColor=44475a&color=50fa7b&label=docker&logo=docker&logoColor=white" alt="Docker"></a>
+  <a href="https://github.com/MrSandman03/Rackula"><img src="https://img.shields.io/badge/fork-RackMate%20T1%20Plus-50fa7b?style=for-the-badge&labelColor=44475a" alt="RackMate T1 Plus fork"></a>
   <img src="https://img.shields.io/badge/versioning-CalVer-ff79c6?style=for-the-badge&labelColor=44475a" alt="CalVer">
-  <a href="https://github.com/RackulaLives/Rackula/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/RackulaLives/Rackula/test.yml?style=for-the-badge&labelColor=44475a" alt="CI"></a>
+  <a href="https://github.com/MrSandman03/Rackula/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/MrSandman03/Rackula/test.yml?style=for-the-badge&labelColor=44475a" alt="Fork CI"></a>
 </p>
 
 <p align="center">
@@ -71,7 +70,9 @@ The RackMate-focused fork has one intentional exception: native 10-inch RackMate
 
 ## RackMate T1 Plus Fork
 
-This branch is tuned for an 8U, 10-inch DeskPi/GeeekPi RackMate T1 Plus with 260mm usable depth. New layouts default to that rack profile, and the RackMate starter includes MS-02 Ultra, Lenovo M720q Tiny, UCG-Max, GS305, PDU, and custom mount/tray placeholders for planning.
+This fork is tuned for an 8U, 10-inch DeskPi/GeeekPi RackMate T1 Plus with 260mm usable depth. New layouts default to that rack profile, and the RackMate starter includes MS-02 Ultra, Lenovo M720q Tiny, UCG-Max, GS305, PDU, and custom mount/tray placeholders for planning.
+
+Fork work happens in `MrSandman03/Rackula`. `RackulaLives/Rackula` remains the upstream project and reference source; do not open RackMate fork execution PRs against upstream unless that is explicitly requested.
 
 ## Get Started
 
@@ -90,7 +91,7 @@ docker run -d -p 8080:8080 ghcr.io/rackulalives/rackula:latest
 Or with Docker Compose:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/RackulaLives/Rackula/main/deploy/docker-compose.persist.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/MrSandman03/Rackula/main/deploy/docker-compose.persist.yml -o docker-compose.yml
 mkdir -p data && sudo chown 1001:1001 data
 docker compose up -d
 ```
@@ -100,7 +101,7 @@ Open `http://localhost:8080` and get after it.
 ### Build from Source
 
 ```bash
-git clone https://github.com/RackulaLives/Rackula.git
+git clone https://github.com/MrSandman03/Rackula.git
 cd Rackula && npm install && npm run build
 ```
 
@@ -135,7 +136,8 @@ This project was built using AI-assisted development with Claude. I told it what
 - [Self-Hosting Guide](docs/deployment/SELF-HOSTING.md)
 - [Changelog](CHANGELOG.md)
 - [Contributing Guide](CONTRIBUTING.md)
-- [Discussions](https://github.com/RackulaLives/Rackula/discussions)
+- [Fork Repository](https://github.com/MrSandman03/Rackula)
+- [Upstream Discussions](https://github.com/RackulaLives/Rackula/discussions)
 
 ## Acknowledgements
 

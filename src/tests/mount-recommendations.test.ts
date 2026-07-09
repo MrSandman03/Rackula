@@ -23,10 +23,10 @@ describe("RackMate mount recommendations", () => {
     const gateway = findBrandDevice("ubiquiti-unifi-cloud-gateway-max")!;
 
     expect(getRecommendedMountSlugs(gateway)).toContain(
-      "deskpi-rackmate-1u-dual-utility-tray",
+      "deskpi-rackmate-1u-utility-tray",
     );
     expect(getMountRecommendation(gateway, 10, library)?.requirement).toContain(
-      "RackMate 1U Dual Utility Tray Placeholder",
+      "RackMate 1U Utility Tray Placeholder",
     );
   });
 

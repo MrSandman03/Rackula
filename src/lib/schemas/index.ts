@@ -19,6 +19,20 @@ import {
   requiresCarrier,
 } from "$lib/utils/carrier-rules";
 import { withRackProfileDefaults } from "$lib/utils/rack-profile";
+import {
+  effectiveSlotHeightUnits,
+  getSlotFitIssues,
+  validateSlotTopology,
+} from "$lib/utils/slot-fit";
+import { findStarterDevice } from "$lib/data/starterLibrary";
+import { deskpiDevices } from "$lib/data/brandPacks/deskpi";
+import { ecoflowDevices } from "$lib/data/brandPacks/ecoflow";
+import { guitkDevices } from "$lib/data/brandPacks/guitk";
+import { lenovoDevices } from "$lib/data/brandPacks/lenovo";
+import { minisforumDevices } from "$lib/data/brandPacks/minisforum";
+import { netgearDevices } from "$lib/data/brandPacks/netgear";
+import { pecronDevices } from "$lib/data/brandPacks/pecron";
+import { ubiquitiDevices } from "$lib/data/brandPacks/ubiquiti";
 
 // Re-export the version-migration cluster so consumers importing from
 // "$lib/schemas" keep their import paths unchanged (the cluster moved to
@@ -34,6 +48,24 @@ const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  * Hex colour pattern: 6-character hex with # prefix
  */
 const HEX_COLOUR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+const SCHEMA_SAFE_BRAND_DEVICES = [
+  ...deskpiDevices,
+  ...ecoflowDevices,
+  ...guitkDevices,
+  ...lenovoDevices,
+  ...minisforumDevices,
+  ...netgearDevices,
+  ...pecronDevices,
+  ...ubiquitiDevices,
+];
+
+function findBuiltInDeviceTypeForSchema(slug: string) {
+  return (
+    findStarterDevice(slug) ??
+    SCHEMA_SAFE_BRAND_DEVICES.find((device) => device.slug === slug)
+  );
+}
 
 // ============================================================================
 // Basic Schemas
@@ -541,6 +573,20 @@ export const DeviceTypeSchema = z
   })
   .passthrough()
   .superRefine((data, ctx) => {
+    if (data.slots && data.slots.length > 0) {
+      for (const issue of validateSlotTopology(data.slots)) {
+        const slotIndex =
+          issue.slotId !== undefined
+            ? data.slots.findIndex((slot) => slot.id === issue.slotId)
+            : -1;
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: issue.message,
+          path: slotIndex >= 0 ? ["slots", slotIndex] : ["slots"],
+        });
+      }
+    }
+
     // Half-depth devices have one physical face; interfaces cannot span both.
     // Unspecified position defaults to 'front', so implicit-front + explicit-rear is also invalid.
     if (
@@ -989,6 +1035,8 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
   const deviceTypeBySlug = new Map(
     data.device_types.map((dt) => [dt.slug, dt]),
   );
+  const resolveDeviceType = (slug: string) =>
+    deviceTypeBySlug.get(slug) ?? findBuiltInDeviceTypeForSchema(slug);
 
   // Check each rack's devices for container relationships
   for (let rackIndex = 0; rackIndex < data.racks.length; rackIndex++) {
@@ -1012,7 +1060,7 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
       // non-integer-height, or half-width gear must sit inside a carrier. Blank
       // filler panels are exempt: a blank may rail-mount at any height.
       if (!device.container_id) {
-        const railType = deviceTypeBySlug.get(device.device_type);
+        const railType = resolveDeviceType(device.device_type);
         const canUseFractionalRail =
           railType &&
           allowsFractionalRailPosition(railType, rack.width) &&
@@ -1057,7 +1105,7 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
       }
 
       // 2. Validate the container's DeviceType has slots
-      const containerType = deviceTypeBySlug.get(container.device_type);
+      const containerType = resolveDeviceType(container.device_type);
       if (!containerType) {
         // DeviceType doesn't exist - this would be caught by other validation
         continue;
@@ -1095,43 +1143,26 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
 
         // 3b. Child must fit its cell (height_units / width_fraction).
         const slot = slotById.get(device.slot_id)!;
-        const childForFit = deviceTypeBySlug.get(device.device_type);
+        const childForFit = resolveDeviceType(device.device_type);
         if (childForFit) {
-          // Category fit: when a slot restricts accepted categories, the child's
-          // category must be allowed. Mirrors canPlaceInSlot so schema and store
-          // enforce identical slot rules (an empty/absent accepts allows all).
-          if (
-            slot.accepts &&
-            slot.accepts.length > 0 &&
-            !slot.accepts.includes(childForFit.category)
-          ) {
+          for (const issue of getSlotFitIssues(childForFit, slot, {
+            rackWidth: rack.width,
+            containerHeightUnits: containerType.u_height,
+          })) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: `Device "${device.name ?? device.id}" (category "${childForFit.category}") is not accepted by slot "${device.slot_id}". Accepts: ${slot.accepts.join(", ")}.`,
+              message: `Device "${device.name ?? device.id}" does not fit slot "${device.slot_id}": ${issue.message}`,
               path: ["racks", rackIndex, "devices", deviceIndex, "slot_id"],
             });
           }
 
-          const slotHeight = slot.height_units ?? 1;
-          if (childForFit.u_height > slotHeight) {
+          const slotHeight = effectiveSlotHeightUnits(slot, {
+            containerHeightUnits: containerType.u_height,
+          });
+          if (device.position + childForFit.u_height > slotHeight) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: `Device "${device.name ?? device.id}" is too tall to fit slot "${device.slot_id}" (${childForFit.u_height}U > ${slotHeight}U cell).`,
-              path: ["racks", rackIndex, "devices", deviceIndex, "slot_id"],
-            });
-          }
-
-          // Width fit mirrors canPlaceInSlot exactly, including its 0.01 float
-          // tolerance, so the schema and the store agree on third-width slots
-          // (0.33 / 0.34). Tightening the tolerance here would diverge from the
-          // store's fit check.
-          const requiredFraction =
-            (childForFit.slot_width ?? 2) === 1 ? 0.5 : 1.0;
-          const availableFraction = slot.width_fraction ?? 1.0;
-          if (requiredFraction > availableFraction + 0.01) {
-            ctx.addIssue({
-              code: z.ZodIssueCode.custom,
-              message: `Device "${device.name ?? device.id}" is too wide to fit slot "${device.slot_id}".`,
+              message: `Device "${device.name ?? device.id}" extends outside slot "${device.slot_id}" (${device.position}U + ${childForFit.u_height}U > ${slotHeight}U cell).`,
               path: ["racks", rackIndex, "devices", deviceIndex, "slot_id"],
             });
           }
@@ -1139,7 +1170,7 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
       }
 
       // 4. Validate no nested containers (single-level nesting only)
-      const childType = deviceTypeBySlug.get(device.device_type);
+      const childType = resolveDeviceType(device.device_type);
       if (childType && childType.slots && childType.slots.length > 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

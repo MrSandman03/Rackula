@@ -140,6 +140,58 @@ describe("Container devices at rack level", () => {
       canPlaceDevice(rack, [serverType, containerType], 4, toInternalUnits(8)),
     ).toBe(false);
   });
+
+  it("rejects opposite-face placements whose known depths exceed rack depth", () => {
+    const frontType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "front-device",
+        u_height: 1,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 160, height: 44 },
+        },
+      },
+    };
+    const rearType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "rear-device",
+        u_height: 1,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 120, height: 44 },
+        },
+      },
+    };
+    const rack = createTestRack({
+      height: 8,
+      depth_mm: 260,
+      devices: [
+        createTestDevice({
+          id: "front-1",
+          device_type: "front-device",
+          position: 3,
+          face: "front",
+        }),
+      ],
+    });
+
+    expect(
+      canPlaceDevice(
+        rack,
+        [frontType, rearType],
+        rearType.u_height,
+        toInternalUnits(3),
+        undefined,
+        "rear",
+        undefined,
+        rearType,
+      ),
+    ).toBe(false);
+  });
 });
 
 // =============================================================================
