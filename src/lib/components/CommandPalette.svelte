@@ -40,6 +40,7 @@
   } from "$lib/actions/dispatch";
   import { getStarterLibrary, getStarterSlugs } from "$lib/data/starterLibrary";
   import { getBrandPacks, getBrandSlugs } from "$lib/data/brandPacks";
+  import { getRackFitSummary } from "$lib/utils/rack-fit";
   import type { ActionId, ActionEnabledContext } from "$lib/actions/registry";
   import type { DeviceType } from "$lib/types";
 
@@ -133,10 +134,19 @@
       uiStore.compatibleOnly,
     ),
   );
+  const commandDeviceLibrary = $derived([
+    ...deviceSources.starter,
+    ...deviceSources.brandPackDevices,
+    ...deviceSources.customDevices,
+  ]);
 
   function deviceLabel(device: DeviceType): string {
     const model = device.model ?? device.slug;
     return device.manufacturer ? `${device.manufacturer} ${model}` : model;
+  }
+
+  function deviceFitSummary(device: DeviceType) {
+    return getRackFitSummary(device, activeRackWidth, commandDeviceLibrary);
   }
 
   function resetState() {
@@ -355,12 +365,21 @@
                         class="command-item"
                         data-testid={`command-palette-device-item-${device.slug}`}
                       >
+                        {@const fitSummary = deviceFitSummary(device)}
                         <span class="command-item-label"
                           >{deviceLabel(device)}</span
                         >
-                        <span class="command-item-shortcut"
-                          >{device.u_height}U</span
-                        >
+                        <span class="command-item-shortcut command-device-meta">
+                          <span>{device.u_height}U</span>
+                          {#if fitSummary}
+                            <span
+                              class="command-fit-badge command-fit-badge--{fitSummary.tone}"
+                              title={fitSummary.title}
+                              aria-label={fitSummary.title}
+                              >{fitSummary.label}</span
+                            >
+                          {/if}
+                        </span>
                       </Command.Item>
                     {/each}
                   </Command.GroupItems>
@@ -758,6 +777,34 @@
     font-size: var(--font-size-sm);
     white-space: nowrap;
     color: var(--colour-text-muted);
+  }
+
+  .command-device-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .command-fit-badge {
+    font-family: var(--font-sans);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .command-fit-badge--ok {
+    color: var(--colour-success);
+  }
+
+  .command-fit-badge--info {
+    color: var(--colour-info, var(--colour-accent));
+  }
+
+  .command-fit-badge--warn {
+    color: var(--colour-warning);
+  }
+
+  .command-fit-badge--blocked {
+    color: var(--colour-error);
   }
 
   /* Why an unavailable command cannot run, shown on the greyed search row

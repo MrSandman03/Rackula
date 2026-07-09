@@ -52,7 +52,7 @@ const POPULATED_RACK = createTestLayout({
 const POPULATED_URL = `/?l=${POPULATED_RACK}`;
 
 // Rack A for the multi-rack row snapshot: a 12U standalone rack. New Rack
-// then adds a 24U rack directly (#2732), so the two racks differ in height
+// then adds an 8U RackMate rack directly (#2732), so the two racks differ in height
 // and prove the bottom-aligned, spaced row (#2733).
 const MULTI_RACK_URL = `/?l=${createTestLayout({
   name: "Multi Rack Layout",
@@ -177,7 +177,7 @@ test.describe("visual regression", () => {
     // The single bottom-aligned row (#2733): two standalone racks of
     // different heights sit on a common baseline (their bases) with aisle
     // spacing between them. Rack A (12U) loads from the share link; New Rack
-    // adds a 24U rack directly on the canvas (#2732).
+    // adds an 8U RackMate rack directly on the canvas (#2732).
     await gotoVisual(page, MULTI_RACK_URL);
     await clickNewRack(page);
     await expect(page.locator(locators.rackView.dualViewName)).toHaveCount(2);

@@ -26,7 +26,7 @@ test.describe("Multi-Rack Mode", () => {
 
     await clickNewRack(page);
 
-    // #2732: a 24U rack is added immediately. No wizard or replace dialog opens.
+    // #2732: an 8U RackMate rack is added immediately. No wizard or replace dialog opens.
     await expect(fronts).toHaveCount(2);
     await expect(page.locator(locators.dialog.root)).not.toBeVisible();
   });

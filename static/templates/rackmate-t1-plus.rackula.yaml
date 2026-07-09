@@ -2,7 +2,7 @@ metadata:
   id: "a1b2c3d4-1001-4001-8001-000000000001"
   name: "RackMate T1 Plus 8U"
   schema_version: "1.0"
-  description: "An 8U 10-inch DeskPi RackMate T1 Plus concept with an MS-02 Ultra shelf candidate, three Lenovo Tiny mounts, a rear 1U PDU, and tray-mounted UCG-Max plus GS305 network gear."
+  description: "An 8U 10-inch DeskPi RackMate T1 Plus concept with an MS-02 Ultra shelf candidate, three Lenovo Tiny mounts, a rear 1U PDU, and full-width tray-mounted UCG-Max plus GS305 network gear."
 version: "1.0.0"
 name: "RackMate T1 Plus 8U"
 racks:
@@ -18,9 +18,9 @@ racks:
     position: 0
     notes: "DeskPi T1 Plus 8U 10-inch rack. Physical fit metadata is provisional until measured."
     devices:
-      - id: "dev-utility-tray-u1"
-        device_type: "deskpi-rackmate-1u-dual-utility-tray"
-        name: "UCG-Max / GS305 Dual Tray"
+      - id: "dev-ucg-tray-u1"
+        device_type: "deskpi-rackmate-1u-utility-tray"
+        name: "UCG-Max Full-Width Tray"
         position: 6
         face: "front"
       - id: "dev-ucg-max"
@@ -28,15 +28,8 @@ racks:
         name: "UCG-Max"
         position: 0
         face: "front"
-        container_id: "dev-utility-tray-u1"
-        slot_id: "left"
-      - id: "dev-gs305"
-        device_type: "netgear-gs305"
-        name: "NETGEAR GS305"
-        position: 0
-        face: "front"
-        container_id: "dev-utility-tray-u1"
-        slot_id: "right"
+        container_id: "dev-ucg-tray-u1"
+        slot_id: "main"
       - id: "dev-pdu-u1-rear"
         device_type: "guitk-10in-1u-pdu-6-outlet"
         name: "Rear 1U PDU"
@@ -104,12 +97,48 @@ racks:
         custom_fields:
           rackula_fit:
             status: "planned"
-      - id: "dev-patch-u8"
-        device_type: "deskpi-12-port-keystone-patch-panel-1u"
-        name: "Patch Panel Placeholder"
+      - id: "dev-gs305-tray-u8"
+        device_type: "deskpi-rackmate-1u-utility-tray"
+        name: "GS305 Full-Width Tray"
         position: 48
         face: "front"
+      - id: "dev-gs305"
+        device_type: "netgear-gs305"
+        name: "NETGEAR GS305"
+        position: 0
+        face: "front"
+        container_id: "dev-gs305-tray-u8"
+        slot_id: "main"
 device_types:
+  - slug: "deskpi-rackmate-1u-utility-tray"
+    manufacturer: "DeskPi"
+    model: "RackMate 1U Utility Tray Placeholder"
+    u_height: 1
+    slot_width: 1
+    rack_widths:
+      - 10
+    is_full_depth: false
+    is_powered: false
+    colour: "#6272A4"
+    category: "shelf"
+    notes: "Planning placeholder for a shallow 10-inch shelf or printable tray for desktop network gear."
+    custom_fields:
+      rackula_fit:
+        status: "needs_mount_selection"
+        mount_type: "shelf-or-3d-printed-tray"
+    slots:
+      - id: "main"
+        name: "Main"
+        position:
+          row: 0
+          col: 0
+        width_fraction: 1
+        height_units: 1
+        accepts:
+          - "network"
+          - "firewall"
+          - "power"
+          - "other"
   - slug: "deskpi-rackmate-1u-dual-utility-tray"
     manufacturer: "DeskPi"
     model: "RackMate 1U Dual Utility Tray Placeholder"
@@ -176,7 +205,6 @@ device_types:
         status: "candidate"
         recommended_tray_u: 1
         recommended_mount_slugs:
-          - "deskpi-rackmate-1u-dual-utility-tray"
           - "deskpi-rackmate-1u-utility-tray"
         rackmate_t1_plus_depth_mm: 260
         rackmate_t1_plus_depth_clearance_mm: 118.2

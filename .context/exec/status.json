@@ -1,14 +1,44 @@
 {
-  "active_session": "20260709-054449-rackmate-agentic-review",
+  "schema_version": 2,
+  "current_session_id": "exec-20260709-080438-rackmate-fork-audit",
   "sessions": {
     "20260709-054449-rackmate-agentic-review": {
-      "status": "merged_to_fork_main",
-      "branch": "main",
+      "session_path": ".context/exec/sessions/20260709-054449-rackmate-agentic-review",
+      "task": "End-to-end RackMate/Rackula bug, feature, QoL, and merge-gate pass",
+      "stage": "done",
+      "current_step": 5,
+      "total_steps": 5,
+      "base_branch": "main",
       "target_branch": "main",
-      "merge_policy": "fork_local_main_after_upstream_pr_closed",
-      "created_at_utc": "2026-07-09T05:44:49Z",
-      "updated_at_utc": "2026-07-09T07:55:36Z",
-      "summary": "End-to-end RackMate/Rackula bug, feature, QoL, and merge-gate pass merged into the fork main."
+      "branch": "main",
+      "worktree": ".",
+      "blockers": [],
+      "last_event": "Closed upstream PR, rewired origin to fork, merged into fork main, and deleted old feature branch.",
+      "last_updated": "2026-07-09T07:55:36Z"
+    },
+    "exec-20260709-080438-rackmate-fork-audit": {
+      "session_path": ".context/exec/sessions/exec-20260709-080438-rackmate-fork-audit",
+      "task": "Complete RackMate fork audit execution plan end to end",
+      "stage": "final_verify",
+      "current_step": 5,
+      "total_steps": 5,
+      "base_branch": "main",
+      "target_branch": "main",
+      "branch": "work/rackmate-fork-audit",
+      "worktree": ".",
+      "blockers": [],
+      "last_event": "Final verification passed; target lock acquired for fork PR handoff.",
+      "last_updated": "2026-07-09T08:32:32Z"
     }
-  }
+  },
+  "target_locks": {
+    "main": {
+      "session_id": "exec-20260709-080438-rackmate-fork-audit",
+      "stage": "final_verify",
+      "branch": "work/rackmate-fork-audit",
+      "since": "2026-07-09T08:32:32Z",
+      "last_updated": "2026-07-09T08:32:32Z"
+    }
+  },
+  "last_updated": "2026-07-09T08:32:32Z"
 }

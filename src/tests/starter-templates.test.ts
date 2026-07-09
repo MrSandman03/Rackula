@@ -139,9 +139,18 @@ describe("loadStarterTemplates", () => {
     ).toBe(true);
     expect(
       layout.device_types.some(
-        (d) => d.slug === "deskpi-rackmate-1u-dual-utility-tray",
+        (d) => d.slug === "deskpi-rackmate-1u-utility-tray",
       ),
     ).toBe(true);
+    const rackMateRack = layout.racks[0]!;
+    const ucg = rackMateRack.devices.find(
+      (d) => d.device_type === "ubiquiti-unifi-cloud-gateway-max",
+    );
+    const ucgTray = rackMateRack.devices.find(
+      (d) => d.id === ucg?.container_id,
+    );
+    expect(ucg?.slot_id).toBe("main");
+    expect(ucgTray?.device_type).toBe("deskpi-rackmate-1u-utility-tray");
     expect(
       layout.device_types.some((d) => d.slug.startsWith("rackmate-")),
     ).toBe(false);

@@ -20,6 +20,12 @@ import { UNITS_PER_U, heightToInternalUnits } from "$lib/utils/position";
 import { findDeviceType } from "$lib/utils/device-lookup";
 import { effectiveFace } from "./effective-face";
 import { allowsFractionalRailPosition } from "./carrier-rules";
+import {
+  getDeviceDepthMm,
+  getSlotFitIssues,
+  effectiveSlotHeightUnits,
+  type SlotFitContext,
+} from "./slot-fit";
 export {
   allowsFractionalRailPosition,
   CARRIER_2COL_SLUG,
@@ -127,6 +133,31 @@ export function doFacesCollide(faceA: DeviceFace, faceB: DeviceFace): boolean {
   return false;
 }
 
+function doDepthsCollide(
+  rackDepthMm: number | undefined,
+  deviceA: DeviceType | undefined,
+  deviceB: DeviceType | undefined,
+): boolean {
+  if (rackDepthMm === undefined || !deviceA || !deviceB) return false;
+  const depthA = getDeviceDepthMm(deviceA);
+  const depthB = getDeviceDepthMm(deviceB);
+  if (depthA === undefined || depthB === undefined) return false;
+  return depthA + depthB > rackDepthMm;
+}
+
+function doPlacedDevicesCollideByFaceAndDepth(
+  rack: Rack,
+  faceA: DeviceFace,
+  deviceA: DeviceType | undefined,
+  faceB: DeviceFace,
+  deviceB: DeviceType | undefined,
+): boolean {
+  const effectiveA = deviceA ? effectiveFace({ face: faceA }, deviceA) : faceA;
+  const effectiveB = deviceB ? effectiveFace({ face: faceB }, deviceB) : faceB;
+  if (doFacesCollide(effectiveA, effectiveB)) return true;
+  return doDepthsCollide(rack.depth_mm, deviceA, deviceB);
+}
+
 /**
  * Check if a device can be placed at a given position (rack-level placement)
  *
@@ -208,7 +239,13 @@ export function canPlaceDevice(
       // Use effectiveFace so full-depth devices collide on both faces.
       if (
         doRangesOverlap(newRange, existingRange) &&
-        doFacesCollide(targetFace, effectiveFace(placedDevice, device))
+        doPlacedDevicesCollideByFaceAndDepth(
+          rack,
+          targetFace,
+          targetDeviceType,
+          placedDevice.face,
+          device,
+        )
       ) {
         return false;
       }
@@ -238,6 +275,7 @@ export function findCollisions(
   newPosition: number,
   excludeIndex?: number,
   targetFace: DeviceFace = "front",
+  targetDeviceType?: DeviceType,
 ): PlacedDevice[] {
   const collisions: PlacedDevice[] = [];
   const newRange = getDeviceURange(newPosition, newDeviceHeight);
@@ -265,7 +303,13 @@ export function findCollisions(
       // Use effectiveFace so full-depth devices collide on both faces.
       if (
         doRangesOverlap(newRange, existingRange) &&
-        doFacesCollide(targetFace, effectiveFace(placedDevice, device))
+        doPlacedDevicesCollideByFaceAndDepth(
+          rack,
+          targetFace,
+          targetDeviceType,
+          placedDevice.face,
+          device,
+        )
       ) {
         collisions.push(placedDevice);
       }
@@ -396,34 +440,12 @@ export function snapToNearestValidPosition(
  * @param slot - The target slot
  * @returns true if device fits and is allowed, false otherwise
  */
-export function canPlaceInSlot(childType: DeviceType, slot: Slot): boolean {
-  // Check category is allowed (if slot.accepts is defined)
-  // Empty accepts array or undefined means all categories allowed
-  if (slot.accepts && slot.accepts.length > 0) {
-    if (!slot.accepts.includes(childType.category)) {
-      return false;
-    }
-  }
-
-  // Convert slot_width to fraction (1=0.5, 2=1.0)
-  // Default slot_width is 2 (full-width), which requires full width_fraction
-  const slotWidth = childType.slot_width ?? 2;
-  const requiredFraction = slotWidth === 1 ? 0.5 : 1.0;
-
-  // Check width fits
-  const availableFraction = slot.width_fraction ?? 1.0;
-  if (requiredFraction > availableFraction + 0.01) {
-    // +0.01 for floating point tolerance
-    return false;
-  }
-
-  // Check height fits (child u_height <= slot height_units)
-  const slotHeight = slot.height_units ?? 1;
-  if (childType.u_height > slotHeight) {
-    return false;
-  }
-
-  return true;
+export function canPlaceInSlot(
+  childType: DeviceType,
+  slot: Slot,
+  context: SlotFitContext = {},
+): boolean {
+  return getSlotFitIssues(childType, slot, context).length === 0;
 }
 
 /**
@@ -492,6 +514,7 @@ export function findNextSlotForChild(
   childType: DeviceType,
   currentSlotId: string,
   siblings: PlacedDevice[],
+  context: SlotFitContext = {},
 ): { slotId: string } | null {
   const slots = containerType.slots ?? [];
   const currentIndex = slots.findIndex((s) => s.id === currentSlotId);
@@ -506,7 +529,14 @@ export function findNextSlotForChild(
   for (let offset = 1; offset < slots.length; offset++) {
     const slot = slots[(currentIndex + offset) % slots.length]!;
     if (occupied.has(slot.id)) continue;
-    if (!canPlaceInSlot(childType, slot)) continue;
+    if (
+      !canPlaceInSlot(childType, slot, {
+        containerHeightUnits: containerType.u_height,
+        ...context,
+      })
+    ) {
+      continue;
+    }
     return { slotId: slot.id };
   }
 
@@ -548,20 +578,30 @@ export function canPlaceInContainer(
     return false;
   }
 
-  // Child device must fit within container height
-  const topPosition = targetPosition + childType.u_height - 1;
-  if (topPosition >= containerType.u_height) {
-    return false;
-  }
-
   // Validate target slot exists and check dimension fit
   const targetSlot = containerType.slots?.find((s) => s.id === targetSlotId);
   if (!targetSlot) {
     return false;
   }
 
+  // Child position is relative to the selected slot. It may start above the
+  // slot bottom only if the full device remains inside that cell.
+  if (
+    targetPosition + childType.u_height >
+    effectiveSlotHeightUnits(targetSlot, {
+      containerHeightUnits: containerType.u_height,
+    })
+  ) {
+    return false;
+  }
+
   // Check if child device dimensions fit within the slot
-  if (!canPlaceInSlot(childType, targetSlot)) {
+  if (
+    !canPlaceInSlot(childType, targetSlot, {
+      rackWidth: rack.width,
+      containerHeightUnits: containerType.u_height,
+    })
+  ) {
     return false;
   }
 

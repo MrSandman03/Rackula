@@ -38,6 +38,7 @@
   import { getBrandPacks, getBrandSlugs } from "$lib/data/brandPacks";
   import { getStarterLibrary, getStarterSlugs } from "$lib/data/starterLibrary";
   import { getMountRecommendation } from "$lib/utils/mount-recommendations";
+  import { getRackFitSummary } from "$lib/utils/rack-fit";
   import DevicePaletteItem from "./DevicePaletteItem.svelte";
   import VirtualList from "./VirtualList.svelte";
   import BrandIcon from "./BrandIcon.svelte";
@@ -337,6 +338,20 @@
     return requirements;
   });
 
+  const fitSummaryBySlug = $derived.by(() => {
+    const summaries: Record<string, ReturnType<typeof getRackFitSummary>> = {};
+
+    for (const device of allPaletteDevices) {
+      summaries[device.slug] = getRackFitSummary(
+        device,
+        activeRackWidth,
+        allPaletteDevices,
+      );
+    }
+
+    return summaries;
+  });
+
   const visibleGenericDevices = $derived(
     filterDevicesByAttributes(
       filterPaletteDevicesByRackWidth(
@@ -570,6 +585,10 @@
   function placementRequirement(device: DeviceType): string | null {
     return placementRequirementBySlug[device.slug] ?? null;
   }
+
+  function fitSummary(device: DeviceType) {
+    return fitSummaryBySlug[device.slug] ?? null;
+  }
 </script>
 
 <div class="device-palette">
@@ -617,6 +636,7 @@
         isCompatible={isCompatible(device)}
         incompatibilityReason={incompatibilityReason(device)}
         placementRequirement={placementRequirement(device)}
+        fitSummary={fitSummary(device)}
         canDelete={canDeleteDevice(device)}
         isFavourite={isFavourite(device.slug)}
         onselect={handleDeviceSelect}

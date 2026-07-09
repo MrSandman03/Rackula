@@ -1,4 +1,5 @@
 import type { Slot } from "$lib/types";
+import { slotHeightUnits, slotWidthFraction } from "./slot-fit";
 
 export interface SlotGeometry {
   x: number;
@@ -10,10 +11,6 @@ export interface SlotGeometry {
 
 function sortedUnique(values: number[]): number[] {
   return [...new Set(values)].sort((a, b) => a - b);
-}
-
-function slotHeightUnits(slot: Slot): number {
-  return slot.height_units ?? 1;
 }
 
 /**
@@ -53,7 +50,7 @@ export function buildSlotGeometry(
     const rowY = containerHeight - (unitsBelow + rowHeight) * heightScale;
 
     for (const slot of rowSlots) {
-      const width = containerWidth * (slot.width_fraction ?? 1);
+      const width = containerWidth * slotWidthFraction(slot);
       const heightUnits = slotHeightUnits(slot);
       geometry.set(slot.id, {
         x,

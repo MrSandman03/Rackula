@@ -14,7 +14,12 @@
     getConflictDetails,
     formatConflictMessage,
   } from "$lib/utils/rack-resize";
-  import { COMMON_RACK_HEIGHTS } from "$lib/types/constants";
+  import {
+    COMMON_RACK_HEIGHTS,
+    MINI_RACK_HEIGHTS,
+    RACKMATE_T1_PLUS_HEIGHT,
+    RACKMATE_T1_PLUS_DEPTH_MM,
+  } from "$lib/types/constants";
   import type { Rack } from "$lib/types";
 
   interface Props {
@@ -37,7 +42,11 @@
   // Check if this rack is part of a bayed group
   const rackGroup = $derived(layoutStore.getRackGroupForRack(rack.id));
   const isBayedRack = $derived(rackGroup?.layout_preset === "bayed");
+  const isRackMateRack = $derived(rack.width === 10);
   const bayCount = $derived(rackGroup?.rack_ids.length ?? 1);
+  const heightPresets = $derived(
+    isRackMateRack ? MINI_RACK_HEIGHTS : COMMON_RACK_HEIGHTS,
+  );
 
   // State for bay count changes
   let bayCountError = $state<string | null>(null);
@@ -54,6 +63,33 @@
     rackHeight = rack.height;
     rackNotes = rack.notes ?? "";
     resizeError = null;
+  });
+
+  $effect(() => {
+    if (!isRackMateRack) return;
+    if (rack.depth_mm !== RACKMATE_T1_PLUS_DEPTH_MM) {
+      layoutStore.updateRack(rack.id, {
+        depth_mm: RACKMATE_T1_PLUS_DEPTH_MM,
+      });
+    }
+    if (rack.height === RACKMATE_T1_PLUS_HEIGHT) return;
+
+    const validation = canResizeRackTo(
+      rack,
+      RACKMATE_T1_PLUS_HEIGHT,
+      layoutStore.device_types,
+    );
+    if (validation.allowed) {
+      rackHeight = RACKMATE_T1_PLUS_HEIGHT;
+      layoutStore.updateRack(rack.id, { height: RACKMATE_T1_PLUS_HEIGHT });
+    } else {
+      const conflicts = getConflictDetails(
+        validation.conflicts,
+        layoutStore.device_types,
+      );
+      resizeError = `RackMate T1 Plus is 8U; ${formatConflictMessage(conflicts)}`;
+      rackHeight = rack.height;
+    }
   });
 
   // Update rack name on blur
@@ -81,6 +117,12 @@
 
   // Validate and apply height change
   function attemptHeightChange(newHeight: number): boolean {
+    if (isRackMateRack && newHeight !== RACKMATE_T1_PLUS_HEIGHT) {
+      resizeError = "RackMate T1 Plus is fixed at 8U";
+      rackHeight = rack.height;
+      return false;
+    }
+
     // Validate the resize
     const validation = canResizeRackTo(
       rack,
@@ -174,12 +216,15 @@
         onchange={handleHeightChange}
         min="1"
         max="100"
+        disabled={isRackMateRack}
       />
       {#if resizeError}
         <p class="helper-text error">Cannot resize: {resizeError}</p>
+      {:else if isRackMateRack}
+        <p class="helper-text">RackMate T1 Plus is fixed at 8U / 260mm</p>
       {/if}
       <div class="height-presets">
-        {#each COMMON_RACK_HEIGHTS as preset (preset)}
+        {#each heightPresets as preset (preset)}
           <button
             type="button"
             class="preset-btn"
@@ -194,10 +239,12 @@
     </div>
 
     <!-- Width (read-only for bayed racks) -->
-    {#if isBayedRack}
+    {#if isBayedRack || isRackMateRack}
       <div class="form-group">
         <span class="form-label">Width</span>
-        <div class="read-only-value">19" (Standard)</div>
+        <div class="read-only-value">
+          {rack.width}"{isRackMateRack ? " (RackMate T1 Plus)" : " (Bayed)"}
+        </div>
       </div>
     {/if}
 

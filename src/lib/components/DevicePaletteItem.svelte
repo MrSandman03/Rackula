@@ -26,6 +26,7 @@
   import { highlightMatch } from "$lib/utils/searchHighlight";
   import PaletteDeviceContextMenu from "./PaletteDeviceContextMenu.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
+  import type { RackFitSummary } from "$lib/utils/rack-fit";
 
   interface Props {
     device: DeviceType;
@@ -37,6 +38,8 @@
     incompatibilityReason?: string | null;
     /** RackMate placement guidance for bay-only devices */
     placementRequirement?: string | null;
+    /** Compact RackMate fit/readiness marker */
+    fitSummary?: RackFitSummary | null;
     /** Whether this device type can be deleted (unused custom type) */
     canDelete?: boolean;
     /** Whether this device is pinned (favourited) to the top of the palette */
@@ -55,6 +58,7 @@
     isCompatible = true,
     incompatibilityReason = null,
     placementRequirement = null,
+    fitSummary = null,
     canDelete = false,
     isFavourite = false,
     onselect,
@@ -74,6 +78,7 @@
     if (isHalfWidth) parts.push("half-width");
     if (device.is_full_depth === false) parts.push("half-depth");
     if (placementRequirement) parts.push(placementRequirement);
+    if (fitSummary) parts.push(fitSummary.title);
     if (isFavourite) parts.push("pinned");
     if (!isCompatible && incompatibilityReason)
       parts.push(`(${incompatibilityReason})`);
@@ -308,6 +313,13 @@
         aria-label={placementRequirement}>Bay</span
       >
     {/if}
+    {#if fitSummary}
+      <span
+        class="form-marker fit-marker fit-marker--{fitSummary.tone}"
+        title={fitSummary.title}
+        aria-label={fitSummary.title}>{fitSummary.label}</span
+      >
+    {/if}
   </span>
   <Tooltip text={isFavourite ? "Unpin device" : "Pin device"} position="left">
     {#snippet triggerChild({ props })}
@@ -495,6 +507,22 @@
     font-weight: var(--font-weight-semibold);
     color: var(--colour-text-muted);
     cursor: help;
+  }
+
+  .fit-marker--ok {
+    color: var(--colour-success);
+  }
+
+  .fit-marker--info {
+    color: var(--colour-info, var(--colour-accent));
+  }
+
+  .fit-marker--warn {
+    color: var(--colour-warning);
+  }
+
+  .fit-marker--blocked {
+    color: var(--colour-error);
   }
 
   .delete-btn {

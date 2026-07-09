@@ -22,6 +22,7 @@
   import { ICON_SIZE } from "$lib/constants/sizing";
   import { canPlaceDevice, findCollisions } from "$lib/utils/collision";
   import { getDeviceDisplayName } from "$lib/utils/device";
+  import { getRackFitSummary } from "$lib/utils/rack-fit";
   import type { SelectedDeviceInfo, DeviceFace } from "$lib/types";
 
   interface Props {
@@ -47,6 +48,19 @@
   const deviceTags = $derived(
     authoritativeDevice.tags ?? selectedDeviceInfo.device.tags ?? [],
   );
+  const rackFitSummary = $derived(
+    getRackFitSummary(
+      authoritativeDevice,
+      selectedDeviceInfo.rack.width,
+      layoutStore.device_types,
+    ),
+  );
+  const rackulaFit = $derived(
+    (authoritativeDevice.custom_fields?.rackula_fit ??
+      selectedDeviceInfo.device.custom_fields?.rackula_fit ??
+      {}) as { open_checks?: string[] },
+  );
+  const openChecks = $derived(rackulaFit.open_checks ?? []);
 
   // Count of device type facts shown in the collapsible block, so the header can
   // report how many are hidden when collapsed. Type, Brand, Height, Depth, Width
@@ -58,6 +72,8 @@
     if (device.category === "power" && device.outlet_count) count += 1;
     if (device.category === "power" && device.va_rating) count += 1;
     if (deviceTags.length > 0) count += 1;
+    if (rackFitSummary) count += 1;
+    if (openChecks.length > 0) count += 1;
     if (device.notes) count += 1;
     return count;
   });
@@ -413,6 +429,15 @@
           >{getCategoryDisplayName(selectedDeviceInfo.device.category)}</span
         >
       </div>
+      {#if rackFitSummary}
+        <div class="fact-row">
+          <span class="fact-label">RackMate fit</span>
+          <span
+            class="fact-value fit-value fit-value--{rackFitSummary.tone}"
+            title={rackFitSummary.title}>{rackFitSummary.label}</span
+          >
+        </div>
+      {/if}
       {#if selectedDeviceInfo.device.category === "power" && selectedDeviceInfo.device.outlet_count}
         <div class="fact-row">
           <span class="fact-label">Outlets</span>
@@ -433,6 +458,16 @@
           <div class="tag-chips">
             {#each deviceTags as tag, i (i)}
               <span class="tag-chip">{tag}</span>
+            {/each}
+          </div>
+        </div>
+      {/if}
+      {#if openChecks.length > 0}
+        <div class="fact-tags">
+          <span class="fact-label">Open checks</span>
+          <div class="tag-chips">
+            {#each openChecks as check, i (i)}
+              <span class="tag-chip">{check}</span>
             {/each}
           </div>
         </div>
@@ -716,6 +751,26 @@
     display: flex;
     align-items: center;
     gap: var(--space-2);
+  }
+
+  .fit-value {
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .fit-value--ok {
+    color: var(--colour-success);
+  }
+
+  .fit-value--info {
+    color: var(--colour-info, var(--colour-accent));
+  }
+
+  .fit-value--warn {
+    color: var(--colour-warning);
+  }
+
+  .fit-value--blocked {
+    color: var(--colour-error);
   }
 
   .fact-notes {

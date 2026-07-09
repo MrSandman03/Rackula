@@ -29,11 +29,12 @@ Homelabbers planning rack layouts. Desktop browser users for creation/editing, m
 
 ### Links
 
-| Resource   | URL                                     |
-| ---------- | --------------------------------------- |
-| Production | https://count.racku.la/                 |
-| Dev        | https://d.racku.la/                     |
-| Repository | https://github.com/RackulaLives/Rackula |
+| Resource           | URL                                     |
+| ------------------ | --------------------------------------- |
+| Production         | https://count.racku.la/                 |
+| Dev                | https://d.racku.la/                     |
+| Fork Repository    | https://github.com/MrSandman03/Rackula  |
+| Upstream Reference | https://github.com/RackulaLives/Rackula |
 
 ---
 
