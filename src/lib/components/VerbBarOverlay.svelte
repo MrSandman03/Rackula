@@ -25,6 +25,7 @@
     moveSelectedDeviceDown,
     moveSelectedDeviceToSlot,
     canMoveSelectedDeviceSlot,
+    isSelectedDeviceContainerChild,
     flipSelectedDeviceFace,
     duplicateSelection,
     moveSelectedRack,
@@ -70,6 +71,7 @@
     hasRacks: layout.rackCount > 0,
     mode: getStorageMode(),
     canMoveDeviceSlot: canMoveSelectedDeviceSlot(),
+    isContainerChildSelected: isSelectedDeviceContainerChild(),
     readOnly: ui.readOnly,
   });
 

@@ -36,17 +36,52 @@ import { generateId } from "./device";
 import { createDefaultRack } from "./serialization";
 import { toHumanUnits, toInternalUnits } from "./position";
 import { hydrateBuiltInDeviceType } from "./built-in-device";
+import {
+  RACKMATE_T1_PLUS_NAME,
+  RACKMATE_T1_PLUS_PROFILE,
+  RACKMATE_T1_PLUS_WIDTH,
+} from "./rack-profile";
+import { RACKMATE_T1_PLUS_HEIGHT } from "$lib/types/constants";
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
 /**
- * Normalize rack width to valid share format values (10 or 19)
- * Maps non-standard widths (21, 23) to 19
+ * Preserve every supported rack width in the share format. The fallback keeps
+ * malformed in-memory data from escaping the encoder, although decoded links
+ * are already constrained by the share schema.
  */
-function normalizeRackWidth(width: number): 10 | 19 {
-  return width === 10 ? 10 : 19;
+function normalizeRackWidth(width: number): 10 | 19 | 21 | 23 {
+  return width === 10 || width === 19 || width === 21 || width === 23
+    ? width
+    : 19;
+}
+
+/** Only JSON-style records are safe to project into the compact share shape. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/**
+ * Pre-profile share links omitted both `pf` and `dp`. Recover RackMate identity
+ * only for the exact tuple emitted by those releases, so ordinary 10-inch
+ * racks and links with explicit physical data retain their original meaning.
+ */
+function resolveSharedRackProfile(
+  rack: Pick<MinimalRackV2, "n" | "h" | "w" | "pf" | "dp">,
+): MinimalRackV2["pf"] {
+  if (rack.pf !== undefined || rack.dp !== undefined) return rack.pf;
+
+  return rack.n === RACKMATE_T1_PLUS_NAME &&
+    rack.h === RACKMATE_T1_PLUS_HEIGHT &&
+    rack.w === RACKMATE_T1_PLUS_WIDTH
+    ? RACKMATE_T1_PLUS_PROFILE
+    : undefined;
 }
 
 /**
@@ -250,7 +285,7 @@ export function toMinimalLayout(layout: Layout): MinimalLayoutV2 {
       ...(deviceType.is_full_depth !== undefined
         ? { fd: deviceType.is_full_depth }
         : {}),
-      ...(deviceType.custom_fields?.rackula_fit
+      ...(isPlainRecord(deviceType.custom_fields?.rackula_fit)
         ? { rf: deviceType.custom_fields.rackula_fit }
         : {}),
     }));
@@ -304,6 +339,7 @@ export function toMinimalLayout(layout: Layout): MinimalLayoutV2 {
 function fromMinimalLayoutV1(minimal: MinimalLayout): Layout {
   const device_types = convertDeviceTypes(minimal.dt);
   const devices = convertMinimalDevices(minimal.r.d);
+  const profile = resolveSharedRackProfile(minimal.r);
 
   const rack = createDefaultRack(
     minimal.r.n,
@@ -314,9 +350,9 @@ function fromMinimalLayoutV1(minimal: MinimalLayout): Layout {
     1,
     true,
     generateId(),
-    minimal.r.pf,
+    profile,
   );
-  if (!minimal.r.pf && minimal.r.dp !== undefined) {
+  if (!profile && minimal.r.dp !== undefined) {
     rack.depth_mm = minimal.r.dp;
   }
   rack.devices = devices;
@@ -345,6 +381,7 @@ function fromMinimalLayoutV2(minimal: MinimalLayoutV2): Layout {
   const racks = minimal.rs.map((minRack) => {
     const rackId = generateId();
     shortIdToUuid.set(minRack.i, rackId);
+    const profile = resolveSharedRackProfile(minRack);
 
     const rack = createDefaultRack(
       minRack.n,
@@ -355,9 +392,9 @@ function fromMinimalLayoutV2(minimal: MinimalLayoutV2): Layout {
       1,
       true,
       rackId,
-      minRack.pf,
+      profile,
     );
-    if (!minRack.pf && minRack.dp !== undefined) {
+    if (!profile && minRack.dp !== undefined) {
       rack.depth_mm = minRack.dp;
     }
     rack.devices = convertMinimalDevices(minRack.d);

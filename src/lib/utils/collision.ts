@@ -16,10 +16,17 @@ import type {
   Rack,
   Slot,
 } from "$lib/types";
-import { UNITS_PER_U, heightToInternalUnits } from "$lib/utils/position";
+import {
+  UNITS_PER_U,
+  heightToInternalUnits,
+  toInternalUnits,
+} from "$lib/utils/position";
 import { findDeviceType } from "$lib/utils/device-lookup";
 import { effectiveFace } from "./effective-face";
-import { allowsFractionalRailPosition } from "./carrier-rules";
+import {
+  allowsFractionalRailPosition,
+  requiresCarrier as deviceRequiresCarrier,
+} from "./carrier-rules";
 import {
   getDeviceDimensionsMm,
   getDeviceDepthMm,
@@ -174,6 +181,83 @@ export function getPlacedAssemblyDepthMm(
   }
 
   return depth;
+}
+
+/**
+ * Validate a rail-level cross-rack move, including every direct child carried
+ * by the selected device. The drag preview and the store both use this helper
+ * so they cannot disagree about target width, slot fit, or assembly depth.
+ */
+export function canMoveRackAssemblyToRack(
+  sourceRack: Rack,
+  targetRack: Rack,
+  deviceLibrary: DeviceType[],
+  deviceIndex: number,
+  newPositionU: number,
+  face?: DeviceFace,
+): boolean {
+  const device = sourceRack.devices[deviceIndex];
+  if (!device) return false;
+
+  const deviceType = findDeviceType(device.device_type, deviceLibrary);
+  if (!deviceType || deviceRequiresCarrier(deviceType, targetRack.width)) {
+    return false;
+  }
+
+  const targetFace: DeviceFace =
+    face ??
+    (deviceType.is_full_depth !== false ? "both" : (device.face ?? "front"));
+  const children = sourceRack.devices.filter(
+    (child) => child.container_id === device.id,
+  );
+
+  for (const child of children) {
+    const childType = findDeviceType(child.device_type, deviceLibrary);
+    if (
+      !childType ||
+      !isDeviceCompatibleWithRackWidth(childType, targetRack.width)
+    ) {
+      return false;
+    }
+
+    const declaredSlot = child.slot_id
+      ? deviceType.slots?.find((slot) => slot.id === child.slot_id)
+      : undefined;
+    const destinationSlot: Slot = declaredSlot ?? {
+      id: "assembly-width",
+      position: { row: 0, col: 0 },
+      width_fraction: 1,
+      height_units: deviceType.u_height,
+    };
+    const slotContext: SlotFitContext = {
+      rackWidth: targetRack.width,
+      containerHeightUnits: deviceType.u_height,
+      containerSlots: deviceType.slots,
+    };
+
+    if (!canPlaceInSlot(childType, destinationSlot, slotContext)) {
+      return false;
+    }
+    if (
+      declaredSlot &&
+      child.position + childType.u_height >
+        effectiveSlotHeightUnits(declaredSlot, slotContext)
+    ) {
+      return false;
+    }
+  }
+
+  return canPlaceDevice(
+    targetRack,
+    deviceLibrary,
+    deviceType.u_height,
+    toInternalUnits(newPositionU),
+    undefined,
+    targetFace,
+    undefined,
+    deviceType,
+    getPlacedAssemblyDepthMm(sourceRack, deviceLibrary, device),
+  );
 }
 
 function getTargetAssemblyDepthMm(

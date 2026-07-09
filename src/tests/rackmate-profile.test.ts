@@ -178,6 +178,50 @@ describe("RackMate profile defaults", () => {
     }
   });
 
+  it("rejects an above-8U device instead of clamping an already normalized RackMate", () => {
+    const deviceType = {
+      slug: "rackmate-device",
+      model: "RackMate Device",
+      u_height: 1,
+      category: "network" as const,
+      colour: "#336699",
+      rack_widths: [10] as const,
+      is_full_depth: false,
+    };
+    const result = LayoutSchema.safeParse({
+      version: "1.0.0",
+      name: "Invalid fixed RackMate position",
+      racks: [
+        {
+          ...rackInput,
+          height: 8,
+          profile: "rackmate-t1-plus",
+          devices: [
+            {
+              id: "device-above-rack",
+              device_type: deviceType.slug,
+              position: 54,
+              face: "front",
+            },
+          ],
+        },
+      ],
+      device_types: [deviceType],
+      settings: { display_mode: "label", show_labels_on_images: false },
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            message: expect.stringContaining("does not fit the RackMate"),
+          }),
+        ]),
+      );
+    }
+  });
+
   it.each([
     {
       name: "19-inch-only",
@@ -318,6 +362,35 @@ describe("RackMate profile defaults", () => {
     const rack = store.addRack("Generic", 12, 19)!;
 
     store.updateRack(rack.id, { profile: "rackmate-t1-plus" });
+    expect(store.getRackById(rack.id)).toMatchObject({
+      profile: "rackmate-t1-plus",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+
+    store.undo();
+    expect(store.getRackById(rack.id)).toMatchObject({
+      width: 19,
+      height: 12,
+      depth_mm: 1000,
+    });
+    expect(store.getRackById(rack.id)?.profile).toBeUndefined();
+
+    store.redo();
+    expect(store.getRackById(rack.id)).toMatchObject({
+      profile: "rackmate-t1-plus",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+  });
+
+  it("records implicit profile dimensions for exact direct undo and redo", () => {
+    const store = getLayoutStore();
+    const rack = store.addRack("Generic", 12, 19)!;
+
+    store.updateRackRecorded(rack.id, { profile: "rackmate-t1-plus" });
     expect(store.getRackById(rack.id)).toMatchObject({
       profile: "rackmate-t1-plus",
       width: 10,

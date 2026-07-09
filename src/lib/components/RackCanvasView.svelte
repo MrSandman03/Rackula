@@ -567,13 +567,22 @@
   ) {
     const { sourceRackId, sourceIndex, targetRackId, targetPosition, face } =
       event.detail;
-    layoutStore.moveDeviceToRack(
+    const moved = layoutStore.moveDeviceToRack(
       sourceRackId,
       sourceIndex,
       targetRackId,
       targetPosition,
       face,
     );
+    if (!moved) {
+      hapticError();
+      toastStore.showToast(
+        "Device assembly doesn't fit this rack",
+        "warning",
+        3000,
+      );
+      return;
+    }
     ondevicemoverack?.(event);
   }
 </script>

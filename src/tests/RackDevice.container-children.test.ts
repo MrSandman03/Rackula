@@ -72,6 +72,23 @@ function renderOccupiedCarrier(onselect = vi.fn()) {
 }
 
 describe("RackDevice container children", () => {
+  it("exposes the carrier and child as sibling button controls", async () => {
+    const { childButton, onselect } = renderOccupiedCarrier();
+    const carrierGroup = screen.getByRole("group", {
+      name: "UCG Tray carrier assembly",
+    });
+    const carrierButton = screen.getByRole("button", {
+      name: /Test Carrier, 1U shelf at U1/,
+    });
+
+    expect(carrierGroup).toContainElement(carrierButton);
+    expect(carrierGroup).toContainElement(childButton);
+    expect(carrierButton).not.toContainElement(childButton);
+
+    await fireEvent.keyDown(carrierButton, { key: "Enter" });
+    expect(onselect.mock.calls[0]?.[0].detail.deviceId).toBe("carrier-1");
+  });
+
   it("selects a child by pointer and suppresses the occupied carrier label", async () => {
     const { childButton, onselect } = renderOccupiedCarrier();
 

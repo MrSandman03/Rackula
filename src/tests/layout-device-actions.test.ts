@@ -930,6 +930,55 @@ describe("Layout Store", () => {
   });
 
   describe("duplicateDevice", () => {
+    it("rejects direct duplication of a contained child", () => {
+      const store = getLayoutStore();
+      const rack = store.addRack("Test Rack", 42)!;
+      const carrierType = store.addDeviceType(
+        createTestDeviceTypeInput({
+          name: "Test Carrier",
+          u_height: 1,
+          category: "shelf",
+          colour: "#8B4513",
+          slots: [
+            {
+              id: "main",
+              position: { row: 0, col: 0 },
+              width_fraction: 1,
+              height_units: 1,
+            },
+          ],
+        }),
+      );
+      const childType = store.addDeviceType(
+        createTestDeviceTypeInput({
+          name: "Contained Device",
+          u_height: 0.5,
+          category: "network",
+          colour: "#4A90D9",
+          slot_width: 2,
+          is_full_depth: false,
+        }),
+      );
+
+      store.placeDevice(rack.id, carrierType.slug, 10);
+      const carrier = store.rack.devices[0]!;
+      expect(
+        store.placeInContainer(rack.id, childType.slug, carrier.id, "main", 0),
+      ).toBe(true);
+      const childIndex = store.rack.devices.findIndex(
+        (device) => device.container_id === carrier.id,
+      );
+      const initialDevices = [...store.rack.devices];
+
+      const result = store.duplicateDevice(rack.id, childIndex);
+
+      expect(result.device).toBeUndefined();
+      expect(result.error).toBe(
+        "Contained devices must be duplicated through their carrier",
+      );
+      expect(store.rack.devices).toEqual(initialDevices);
+    });
+
     it("duplicates device with all properties inherited", () => {
       const store = getLayoutStore();
       const rack = store.addRack("Test Rack", 42);

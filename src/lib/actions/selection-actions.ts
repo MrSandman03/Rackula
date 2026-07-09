@@ -146,6 +146,24 @@ export function canMoveSelectedDeviceSlot(): boolean {
   );
 }
 
+/** Whether the live device selection is mounted inside a carrier. */
+export function isSelectedDeviceContainerChild(): boolean {
+  const selectionStore = getSelectionStore();
+  const layoutStore = getLayoutStore();
+
+  if (!selectionStore.isDeviceSelected) return false;
+  if (selectionStore.selectedRackId === null) return false;
+
+  const rack = layoutStore.getRackById(selectionStore.selectedRackId);
+  if (!rack) return false;
+
+  const deviceIndex = selectionStore.getSelectedDeviceIndex(rack.devices);
+  if (deviceIndex === null) return false;
+
+  const selectedDevice = rack.devices[deviceIndex];
+  return selectedDevice ? isContainerChild(selectedDevice) : false;
+}
+
 /**
  * Move the selected contained child to the next free cell of its carrier.
  * No-op when no device is selected, the device is not a carrier child, or the

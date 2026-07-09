@@ -68,6 +68,7 @@
     flipSelectedDeviceFace,
     duplicateSelection,
     canMoveSelectedDeviceSlot,
+    isSelectedDeviceContainerChild,
   } from "$lib/actions/selection-actions";
   import { handleDelete, handleNewRack } from "$lib/utils/dialog-actions";
   import {
@@ -541,6 +542,7 @@
     hasRacks: layoutStore.rackCount > 0,
     mode: getStorageMode(),
     canMoveDeviceSlot: canMoveSelectedDeviceSlot(),
+    isContainerChildSelected: isSelectedDeviceContainerChild(),
     readOnly: uiStore.readOnly,
   });
 

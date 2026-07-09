@@ -1,0 +1,57 @@
+metadata:
+  id: 88888888-8888-4888-8888-888888888888
+  name: All-Omitted Multirow Slots
+  schema_version: "1.0"
+version: "26.6.6"
+name: All-Omitted Multirow Slots
+racks:
+  - id: rack-a
+    name: Rack A
+    height: 8
+    width: 19
+    depth_mm: 1000
+    desc_units: false
+    show_rear: true
+    form_factor: 4-post-cabinet
+    starting_unit: 1
+    position: 0
+    devices:
+      - id: legacy-container
+        device_type: legacy-2u-container
+        position: 6
+        face: front
+      - id: legacy-child
+        device_type: legacy-2u-child
+        position: 0
+        face: front
+        container_id: legacy-container
+        slot_id: bottom
+device_types:
+  - slug: legacy-2u-container
+    u_height: 2
+    rack_widths: [19]
+    is_full_depth: false
+    colour: "#445566"
+    category: chassis
+    subdevice_role: parent
+    slots:
+      - id: bottom
+        position:
+          row: 0
+          col: 0
+        width_fraction: 1
+      - id: top
+        position:
+          row: 1
+          col: 0
+        width_fraction: 1
+  - slug: legacy-2u-child
+    u_height: 2
+    rack_widths: [19]
+    is_full_depth: false
+    colour: "#667788"
+    category: server
+    subdevice_role: child
+settings:
+  display_mode: label
+  show_labels_on_images: false

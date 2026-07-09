@@ -16,6 +16,7 @@ import {
 import type { LayoutStateAccess } from "./types";
 import { getCommandStoreAdapter } from "./command-adapters";
 import { getTargetRack, getRackById } from "./rack-actions";
+import { constrainRackProfileUpdates } from "$lib/utils/rack-profile";
 
 /**
  * Bind a command to a specific rack. The raw mutators behind rack commands
@@ -68,9 +69,11 @@ export function updateRackRecorded(
   const targetRack = getRackById(ctx, rackId);
   if (!targetRack) return;
 
+  const constrainedUpdates = constrainRackProfileUpdates(targetRack, updates);
+
   // Capture before state
   const before: Partial<Omit<Rack, "devices" | "view">> = {};
-  for (const key of Object.keys(updates) as (keyof Omit<
+  for (const key of Object.keys(constrainedUpdates) as (keyof Omit<
     Rack,
     "devices" | "view"
   >)[]) {
@@ -83,7 +86,7 @@ export function updateRackRecorded(
   const command = bindCommandToRack(
     ctx,
     rackId,
-    createUpdateRackCommand(before, updates, adapter),
+    createUpdateRackCommand(before, constrainedUpdates, adapter),
   );
   history.execute(command);
   ctx.markDirty();
@@ -112,15 +115,16 @@ export function updateRacksBatchRecorded(
   for (const { rackId, updates } of targets) {
     const targetRack = getRackById(ctx, rackId);
     if (!targetRack) continue;
+    const constrainedUpdates = constrainRackProfileUpdates(targetRack, updates);
 
     const before: Partial<Omit<Rack, "devices" | "view">> = {};
     let differs = false;
-    for (const key of Object.keys(updates) as (keyof Omit<
+    for (const key of Object.keys(constrainedUpdates) as (keyof Omit<
       Rack,
       "devices" | "view"
     >)[]) {
       const current = targetRack[key];
-      const next = updates[key];
+      const next = constrainedUpdates[key];
       if (current !== next) {
         differs = true;
       }
@@ -134,7 +138,7 @@ export function updateRacksBatchRecorded(
       ...bindCommandToRack(
         ctx,
         rackId,
-        createUpdateRackCommand(before, updates, adapter),
+        createUpdateRackCommand(before, constrainedUpdates, adapter),
       ),
       description,
     });

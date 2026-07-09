@@ -166,8 +166,8 @@ export const MinimalRackSchema = z.object({
   n: z.string(),
   /** height */
   h: z.number().int().min(1).max(100),
-  /** width (normalized to 10 or 19 for share links) */
-  w: z.union([z.literal(10), z.literal(19)]),
+  /** width (all supported physical rack standards) */
+  w: z.union([z.literal(10), z.literal(19), z.literal(21), z.literal(23)]),
   /** named physical rack profile */
   pf: z.literal("rackmate-t1-plus").optional(),
   /** rack depth in millimetres */

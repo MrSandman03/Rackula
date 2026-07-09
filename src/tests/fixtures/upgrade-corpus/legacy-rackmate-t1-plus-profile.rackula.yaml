@@ -1,0 +1,22 @@
+metadata:
+  id: 77777777-7777-4777-8777-777777777777
+  name: Legacy RackMate T1 Plus
+  schema_version: "1.0"
+version: "1.0.0"
+name: Legacy RackMate T1 Plus
+racks:
+  - id: rack-rackmate
+    name: RackMate T1 Plus
+    height: 8
+    width: 10
+    depth_mm: 260
+    desc_units: false
+    show_rear: true
+    form_factor: 4-post-cabinet
+    starting_unit: 1
+    position: 0
+    devices: []
+device_types: []
+settings:
+  display_mode: label
+  show_labels_on_images: false

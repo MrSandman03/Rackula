@@ -62,6 +62,10 @@ function requireDecoded(encoded: string): Layout {
   return layout;
 }
 
+function encodeLegacyPayload(payload: unknown): string {
+  return base64UrlEncode(pako.deflate(JSON.stringify(payload)));
+}
+
 /**
  * Creates a layout with devices for testing encoding/decoding.
  */
@@ -109,13 +113,15 @@ describe("toMinimalLayout", () => {
     expect(minimal.rs[0].w).toBe(19);
   });
 
-  it("normalizes rack width 10 to 10", () => {
+  it("round-trips rack width 10", () => {
     const layout = createTestLayout({
       racks: [createTestRack({ width: 10, devices: [] })],
     });
     const minimal = toMinimalLayout(layout);
+    const decoded = requireDecoded(requireEncoded(layout));
 
     expect(minimal.rs[0].w).toBe(10);
+    expect(decoded.racks[0]?.width).toBe(10);
   });
 
   it("round-trips the RackMate T1 Plus profile", () => {
@@ -242,33 +248,81 @@ describe("toMinimalLayout", () => {
     expect(fit?.open_checks).toEqual(["measure cable clearance"]);
   });
 
-  it("normalizes rack width 19 to 19", () => {
+  it.each([
+    ["an array", []],
+    ["a string", "invalid-fit-metadata"],
+    ["a non-plain object", new Date("2026-01-01T00:00:00Z")],
+  ])("omits malformed rackula_fit metadata when it is %s", (_label, fit) => {
+    const deviceType = createTestDeviceType({ slug: "malformed-fit-device" });
+    deviceType.custom_fields = { rackula_fit: fit };
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          devices: [createTestDevice({ device_type: deviceType.slug })],
+        }),
+      ],
+      device_types: [deviceType],
+    });
+
+    const minimal = toMinimalLayout(layout);
+    const decoded = requireDecoded(requireEncoded(layout));
+
+    expect(minimal.dt[0]?.rf).toBeUndefined();
+    expect(decoded.device_types[0]?.custom_fields?.rackula_fit).toBeUndefined();
+  });
+
+  it("round-trips rack width 19", () => {
     const layout = createTestLayout({
       racks: [createTestRack({ width: 19, devices: [] })],
     });
     const minimal = toMinimalLayout(layout);
+    const decoded = requireDecoded(requireEncoded(layout));
 
     expect(minimal.rs[0].w).toBe(19);
+    expect(decoded.racks[0]?.width).toBe(19);
   });
 
-  it("normalizes non-standard rack width 21 to 19", () => {
+  it("round-trips rack width 21", () => {
     const layout = createTestLayout({
-      // Test legacy/invalid width - cast via unknown for type safety
-      racks: [createTestRack({ width: 21 as unknown as 10 | 19, devices: [] })],
+      racks: [createTestRack({ width: 21, devices: [] })],
     });
     const minimal = toMinimalLayout(layout);
+    const decoded = requireDecoded(requireEncoded(layout));
 
-    expect(minimal.rs[0].w).toBe(19);
+    expect(minimal.rs[0].w).toBe(21);
+    expect(decoded.racks[0]?.width).toBe(21);
   });
 
-  it("normalizes non-standard rack width 23 to 19", () => {
+  it("round-trips rack width 23 and 23-inch-only device constraints", () => {
+    const deviceType = createTestDeviceType({
+      slug: "telecom-device",
+      rack_widths: [23],
+    });
+    deviceType.custom_fields = {
+      rackula_fit: {
+        dimensions_mm: { width: 550, depth: 300, height: 44 },
+      },
+    };
     const layout = createTestLayout({
-      // Test legacy/invalid width - cast via unknown for type safety
-      racks: [createTestRack({ width: 23 as unknown as 10 | 19, devices: [] })],
+      racks: [
+        createTestRack({
+          width: 23,
+          depth_mm: 600,
+          devices: [createTestDevice({ device_type: deviceType.slug })],
+        }),
+      ],
+      device_types: [deviceType],
     });
     const minimal = toMinimalLayout(layout);
+    const decoded = requireDecoded(requireEncoded(layout));
 
-    expect(minimal.rs[0].w).toBe(19);
+    expect(minimal.rs[0].w).toBe(23);
+    expect(minimal.dt[0]?.rw).toEqual([23]);
+    expect(decoded.racks[0]?.width).toBe(23);
+    expect(decoded.device_types[0]?.rack_widths).toEqual([23]);
+    expect(decoded.device_types[0]?.custom_fields?.rackula_fit).toMatchObject({
+      dimensions_mm: { width: 550 },
+    });
   });
 
   it("only includes device types that are placed", () => {
@@ -987,6 +1041,76 @@ describe("multi-rack share", () => {
     expect(
       decoded!.device_types.find((dt) => dt.slug === "legacy-server"),
     ).toBeDefined();
+  });
+
+  it("infers the RackMate profile from an exact legacy v1 rack tuple", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      n: "Legacy RackMate Layout",
+      r: {
+        n: "RackMate T1 Plus",
+        h: 8,
+        w: 10,
+        d: [],
+      },
+      dt: [],
+    });
+
+    const decoded = requireDecoded(encoded);
+
+    expect(decoded.racks[0]?.profile).toBe("rackmate-t1-plus");
+    expect(decoded.racks[0]?.depth_mm).toBe(260);
+  });
+
+  it("infers the RackMate profile from an exact legacy v2 rack tuple", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 2,
+      n: "Legacy RackMate Layout",
+      rs: [
+        {
+          i: "0",
+          n: "RackMate T1 Plus",
+          h: 8,
+          w: 10,
+          d: [],
+        },
+      ],
+      dt: [],
+    });
+
+    const decoded = requireDecoded(encoded);
+
+    expect(decoded.racks[0]?.profile).toBe("rackmate-t1-plus");
+    expect(decoded.racks[0]?.depth_mm).toBe(260);
+  });
+
+  it.each([
+    ["an explicit depth", { dp: 260 }],
+    ["a different name", { n: "Generic 10-inch Rack" }],
+    ["a different height", { h: 9 }],
+    ["a different width", { w: 19 }],
+  ])("does not infer the RackMate profile with %s", (_label, override) => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 2,
+      n: "Near-match Layout",
+      rs: [
+        {
+          i: "0",
+          n: "RackMate T1 Plus",
+          h: 8,
+          w: 10,
+          d: [],
+          ...override,
+        },
+      ],
+      dt: [],
+    });
+
+    const decoded = requireDecoded(encoded);
+
+    expect(decoded.racks[0]?.profile).toBeUndefined();
   });
 
   it("decodes pako-encoded v2 share links (backward compatibility)", () => {

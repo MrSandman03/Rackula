@@ -76,6 +76,9 @@ export function attachPointerDragListeners(
     const rack = ctx.getRack();
     const isInternalMove = event.detail.rackId === rack.id;
     const excludeIndex = isInternalMove ? event.detail.deviceIndex : undefined;
+    const sourceRack = isInternalMove
+      ? undefined
+      : ctx.layoutStore.getRackById(event.detail.rackId);
 
     const result = resolveDropTarget(
       { svgElement, clientX, clientY },
@@ -85,6 +88,9 @@ export function attachPointerDragListeners(
       device,
       ctx.getFaceFilter(),
       excludeIndex,
+      sourceRack
+        ? { rack: sourceRack, deviceIndex: event.detail.deviceIndex }
+        : undefined,
     );
 
     ctx.setContainerHoverInfo(result.containerHoverInfo);
@@ -118,6 +124,10 @@ export function attachPointerDragListeners(
     const rack = ctx.getRack();
     const deviceLibrary = ctx.getDeviceLibrary();
     const faceFilter = ctx.getFaceFilter();
+    const sourceRack =
+      sourceRackId === rack.id
+        ? undefined
+        : ctx.layoutStore.getRackById(sourceRackId);
 
     const coords = { svgElement, clientX, clientY };
     const dims = ctx.getRackDims();
@@ -130,6 +140,7 @@ export function attachPointerDragListeners(
       { type: "rack-device", device, sourceRackId, sourceIndex: deviceIndex },
       faceFilter,
       false,
+      sourceRack,
     );
 
     dispatchDropAction(action, ctx.getEventCallbacks(), {
@@ -140,6 +151,7 @@ export function attachPointerDragListeners(
       layoutStore: ctx.layoutStore,
       coords,
       dims,
+      sourceRack,
     });
 
     ctx.onDragFinished();

@@ -31,6 +31,7 @@ import {
   hydrateBuiltInDeviceType,
 } from "$lib/utils/built-in-device";
 import { isDeviceCompatibleWithRackWidth } from "$lib/utils/rack-width";
+import type { DeviceType, Slot } from "$lib/types";
 
 // Re-export the version-migration cluster so consumers importing from
 // "$lib/schemas" keep their import paths unchanged (the cluster moved to
@@ -46,6 +47,29 @@ const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  * Hex colour pattern: 6-character hex with # prefix
  */
 const HEX_COLOUR_PATTERN = /^#[0-9a-fA-F]{6}$/;
+
+/**
+ * Prior releases treated every omitted-height slot as the full container
+ * height, even in a multi-row grid. Keep that interpretation only while
+ * validating saved layouts that have the exact legacy all-omitted signature;
+ * runtime placement and geometry continue to use the corrected row heights.
+ */
+function slotForPriorReleaseAllOmittedRowsLayoutValidation(
+  slot: Slot,
+  containerType: Pick<DeviceType, "u_height" | "slots">,
+): Slot {
+  const slots = containerType.slots;
+  if (
+    slot.height_units !== undefined ||
+    !slots?.length ||
+    slots.some((candidate) => candidate.height_units !== undefined) ||
+    new Set(slots.map((candidate) => candidate.position.row)).size <= 1
+  ) {
+    return slot;
+  }
+
+  return { ...slot, height_units: containerType.u_height };
+}
 
 // ============================================================================
 // Basic Schemas
@@ -925,18 +949,17 @@ export const LayoutSchemaBase = LayoutSchemaInput.transform((data) => {
       ...rack,
       id: rack.id ?? nanoid(),
     });
-    const profileReducedHeight =
-      rack.profile === "rackmate-t1-plus" &&
-      rack.height !== rackWithProfileDefaults.height;
+    const hasFixedRackProfile =
+      rackWithProfileDefaults.profile === "rackmate-t1-plus";
 
     return {
       ...rackWithProfileDefaults,
       // Positions are in internal units here; clamp any rail device whose top
       // extends above the rack down to the highest within-rack whole-U (#2661).
-      // A named profile that reduces the declared height is stricter: preserve
-      // the original positions so refinement rejects incompatible contents
-      // instead of silently stacking them at the new top U.
-      devices: profileReducedHeight
+      // Fixed named profiles are stricter: preserve their saved positions so
+      // refinement rejects incompatible contents instead of silently stacking
+      // them at the top. Generic racks retain the prior-release clamp.
+      devices: hasFixedRackProfile
         ? migratedDevices
         : clampOverRackPositions(
             migratedDevices,
@@ -1159,6 +1182,11 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
 
         // 3b. Child must fit its cell (height_units / width_fraction).
         const slot = slotById.get(device.slot_id)!;
+        const slotForLayoutValidation =
+          slotForPriorReleaseAllOmittedRowsLayoutValidation(
+            slot,
+            containerType,
+          );
         const childForFit = resolveDeviceType(device.device_type);
         if (childForFit) {
           if (!isDeviceCompatibleWithRackWidth(childForFit, rack.width)) {
@@ -1169,11 +1197,15 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
             });
           }
 
-          for (const issue of getSlotFitIssues(childForFit, slot, {
-            rackWidth: rack.width,
-            containerHeightUnits: containerType.u_height,
-            containerSlots: containerType.slots,
-          })) {
+          for (const issue of getSlotFitIssues(
+            childForFit,
+            slotForLayoutValidation,
+            {
+              rackWidth: rack.width,
+              containerHeightUnits: containerType.u_height,
+              containerSlots: containerType.slots,
+            },
+          )) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
               message: `Device "${device.name ?? device.id}" does not fit slot "${device.slot_id}": ${issue.message}`,
@@ -1181,7 +1213,7 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
             });
           }
 
-          const slotHeight = effectiveSlotHeightUnits(slot, {
+          const slotHeight = effectiveSlotHeightUnits(slotForLayoutValidation, {
             containerHeightUnits: containerType.u_height,
             containerSlots: containerType.slots,
           });

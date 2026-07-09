@@ -9,6 +9,7 @@ import {
   findSilentLosses,
   type AllowListEntry,
 } from "./upgrade-corpus-helpers";
+import { effectiveSlotHeightUnits } from "$lib/utils/slot-fit";
 
 interface Sidecar {
   reject?: boolean;
@@ -108,5 +109,52 @@ describe("upgrade corpus: depth/base-weight defaults (#2738)", () => {
     const rack = layout.racks[0]!;
     expect(rack.depth_mm).toBe(1000);
     expect(rack.base_weight).toBe(0);
+  });
+});
+
+const legacyRackMateYaml = (
+  await import("./fixtures/upgrade-corpus/legacy-rackmate-t1-plus-profile.rackula.yaml?raw")
+).default as string;
+
+describe("upgrade corpus: legacy RackMate profile inference", () => {
+  it("infers the named profile from the exact old YAML signature", async () => {
+    const layout = await parseLayoutYaml(legacyRackMateYaml);
+
+    expect(layout.racks[0]).toMatchObject({
+      name: "RackMate T1 Plus",
+      profile: "rackmate-t1-plus",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+  });
+});
+
+const allOmittedMultirowYaml = (
+  await import("./fixtures/upgrade-corpus/v26.6.6-all-omitted-multirow-slots.rackula.yaml?raw")
+).default as string;
+
+describe("upgrade corpus: all-omitted multirow slot heights", () => {
+  it("loads the prior-valid child while runtime row geometry stays corrected", async () => {
+    const layout = await parseLayoutYaml(allOmittedMultirowYaml);
+    const containerType = layout.device_types.find(
+      (deviceType) => deviceType.slug === "legacy-2u-container",
+    )!;
+    const slots = containerType.slots!;
+
+    expect(
+      layout.racks[0]?.devices.find((device) => device.id === "legacy-child"),
+    ).toMatchObject({
+      container_id: "legacy-container",
+      slot_id: "bottom",
+      position: 0,
+    });
+    expect(slots.every((slot) => slot.height_units === undefined)).toBe(true);
+    expect(
+      effectiveSlotHeightUnits(slots[0]!, {
+        containerHeightUnits: containerType.u_height,
+        containerSlots: slots,
+      }),
+    ).toBe(1);
   });
 });

@@ -17,6 +17,7 @@ import {
 } from "$lib/utils/dragdrop";
 import {
   allowsFractionalRailPosition,
+  canMoveRackAssemblyToRack,
   findCollisions,
   synthesizeCarrierForDevice,
   requiresChassisBay,
@@ -58,6 +59,12 @@ export interface DropTargetResult {
   feedback: DropFeedback;
   containerHoverInfo: ContainerHoverInfo | null;
   dropPreview: DropPreview;
+}
+
+/** Source assembly details needed to validate a cross-rack preview. */
+export interface RackAssemblyDragSource {
+  rack: Rack;
+  deviceIndex: number;
 }
 
 /**
@@ -196,6 +203,7 @@ export function resolveDropTarget(
   device: DeviceType,
   faceFilter: DeviceFace | undefined,
   excludeIndex?: number,
+  assemblySource?: RackAssemblyDragSource,
 ): DropTargetResult {
   const { mouseY, xOffsetInRack } = resolveCoordinates(coords, dims);
 
@@ -273,6 +281,25 @@ export function resolveDropTarget(
     );
   }
 
+  if (
+    feedback === "valid" &&
+    assemblySource &&
+    assemblySource.rack.id !== rack.id &&
+    !resolvableContainerTarget &&
+    !carrierSlug &&
+    !needsBay &&
+    !canMoveRackAssemblyToRack(
+      assemblySource.rack,
+      rack,
+      deviceLibrary,
+      assemblySource.deviceIndex,
+      targetU,
+      faceFilter,
+    )
+  ) {
+    feedback = "blocked";
+  }
+
   return {
     targetU,
     xOffsetInRack,
@@ -299,6 +326,7 @@ export function resolveDropAction(
   faceFilter: DeviceFace | undefined,
   /** Set true to skip container detection (the fallthrough re-resolution after a failed container placement). */
   skipContainer: boolean = false,
+  sourceRack?: Rack,
 ): DropAction {
   const { mouseY, xOffsetInRack } = resolveCoordinates(coords, dims);
 
@@ -340,6 +368,14 @@ export function resolveDropAction(
   }
 
   const excludeIndex = deriveExcludeIndex(dragData, rack.id);
+  const isInternalMove =
+    dragData.type === "rack-device" &&
+    dragData.sourceRackId === rack.id &&
+    dragData.sourceIndex !== undefined;
+  const isCrossRackMove =
+    dragData.type === "rack-device" &&
+    dragData.sourceRackId !== rack.id &&
+    dragData.sourceIndex !== undefined;
 
   // No container under the cursor: a carriable device synthesises (or fills) a
   // carrier at the target U via the store. Validate the carrier's full rail
@@ -418,15 +454,27 @@ export function resolveDropAction(
     };
   }
 
-  const isInternalMove =
-    dragData.type === "rack-device" &&
-    dragData.sourceRackId === rack.id &&
-    dragData.sourceIndex !== undefined;
-
-  const isCrossRackMove =
-    dragData.type === "rack-device" &&
-    dragData.sourceRackId !== rack.id &&
-    dragData.sourceIndex !== undefined;
+  if (
+    isCrossRackMove &&
+    (!sourceRack ||
+      !canMoveRackAssemblyToRack(
+        sourceRack,
+        rack,
+        deviceLibrary,
+        dragData.sourceIndex!,
+        targetU,
+        faceFilter,
+      ))
+  ) {
+    return {
+      kind: "invalid",
+      feedback: "blocked",
+      targetU,
+      deviceHeight: dragData.device.u_height,
+      deviceType: dragData.device,
+      message: "Device assembly doesn't fit this rack",
+    };
+  }
 
   if (isInternalMove && dragData.sourceIndex !== undefined) {
     return {

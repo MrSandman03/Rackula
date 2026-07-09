@@ -355,6 +355,9 @@
   const isContainer = $derived(
     Array.isArray(device.slots) && device.slots.length > 0,
   );
+  const hasContainerChildren = $derived(
+    isContainer && containerChildDevices.length > 0,
+  );
 
   // Aria label for accessibility - includes container hierarchy for child devices
   const ariaLabel = $derived.by(() => {
@@ -668,13 +671,12 @@
   class="rack-device"
   class:selected
   class:dragging={isDragging}
-  role="button"
-  tabindex="0"
-  aria-label={ariaLabel}
-  aria-pressed={selected}
+  role={hasContainerChildren ? "group" : undefined}
+  aria-label={hasContainerChildren
+    ? `${displayName} carrier assembly`
+    : undefined}
   onclick={(e) => e.stopPropagation()}
   oncontextmenu={handleContextMenu}
-  onkeydown={handleKeyDown}
 >
   <!-- Device rectangle with pointer events (Safari 18.x fix #411)
        Using explicit geometry rect for pointer events instead of <g> element
@@ -690,8 +692,12 @@
     fill={effectiveColour}
     rx="2"
     ry="2"
-    role="presentation"
-    aria-hidden="true"
+    role="button"
+    tabindex="0"
+    aria-label={ariaLabel}
+    aria-pressed={selected}
+    onclick={(event) => event.stopPropagation()}
+    onkeydown={handleKeyDown}
     onpointerdown={handlePointerDown}
     onpointermove={handlePointerMove}
     onpointerup={handlePointerUp}
@@ -916,7 +922,9 @@
               font-size={Math.min(11, childHeight * 0.6)}
               fill="var(--colour-text-on-device)"
             >
-              {childName.length > 12 ? childName.slice(0, 10) + "…" : childName}
+              {childName.length > 12
+                ? childName.slice(0, 10) + "..."
+                : childName}
             </text>
           </g>
         {/if}
@@ -973,6 +981,12 @@
 
   /* Focus-visible for keyboard-only focus indication */
   .rack-device:focus-visible .device-rect {
+    stroke: var(--colour-selection);
+    stroke-width: 2;
+  }
+
+  .device-rect:focus-visible {
+    outline: none;
     stroke: var(--colour-selection);
     stroke-width: 2;
   }

@@ -15,11 +15,11 @@ import {
   canPlaceDevice,
   canPlaceInContainer,
   canPlaceInSlot,
-  getPlacedAssemblyDepthMm,
+  canMoveRackAssemblyToRack,
   findValidDropPositions,
   findNextFreeChildPosition,
   findNextSlotForChild,
-  requiresCarrier,
+  isContainerChild,
   synthesizeCarrierForDevice,
 } from "$lib/utils/collision";
 import { findDeviceType as findDeviceTypeInArray } from "$lib/stores/layout-helpers";
@@ -28,10 +28,7 @@ import { isDeviceCompatibleWithRackWidth } from "$lib/utils/deviceFilters";
 import { generateId } from "$lib/utils/device";
 import { toInternalUnits } from "$lib/utils/position";
 import { instantiatePorts } from "$lib/utils/port-utils";
-import {
-  effectiveSlotHeightUnits,
-  getDeviceDepthMm,
-} from "$lib/utils/slot-fit";
+import { getDeviceDepthMm } from "$lib/utils/slot-fit";
 import {
   createPlaceDeviceCommand,
   createAddDeviceTypeCommand,
@@ -78,6 +75,12 @@ export function duplicateDevice(
   }
 
   const sourceDevice = sourceRack.devices[deviceIndex]!;
+  if (isContainerChild(sourceDevice)) {
+    return {
+      error: "Contained devices must be duplicated through their carrier",
+    };
+  }
+
   const deviceType = findDeviceTypeInArray(
     layout.device_types,
     sourceDevice.device_type,
@@ -537,81 +540,28 @@ export function moveDeviceToRack(
   );
   if (!deviceType) return false;
 
-  // Carrier-first rule (#2158/C4): a cross-rack move lands on a rail position in
-  // the target rack. A carrier-requiring device cannot rail-mount, so refuse
-  // rather than create an invalid placement in the destination rack.
-  if (requiresCarrier(deviceType, targetRack.width)) return false;
-
   // Resolve face: use provided face, or infer from device type
   const effectiveFace: DeviceFace =
     face ??
     (deviceType.is_full_depth !== false ? "both" : (device.face ?? "front"));
   const positionInternal = toInternalUnits(newPosition);
 
-  // A container moves with its children, so validate the deepest source
-  // assembly against the destination rather than only the parent shell.
-  const children = sourceRack.devices.filter(
-    (child) => child.container_id === device.id,
-  );
-  const assemblyDepthMm = getPlacedAssemblyDepthMm(
-    sourceRack,
-    layout.device_types,
-    device,
-  );
-
-  for (const child of children) {
-    const childType = findDeviceType(child.device_type, layout.device_types);
-    if (!childType) return false;
-    if (!isDeviceCompatibleWithRackWidth(childType, targetRack.width)) {
-      return false;
-    }
-
-    const declaredSlot = child.slot_id
-      ? deviceType.slots?.find((slot) => slot.id === child.slot_id)
-      : undefined;
-    const destinationSlot = declaredSlot ?? {
-      id: "assembly-width",
-      position: { row: 0, col: 0 },
-      width_fraction: 1,
-      height_units: deviceType.u_height,
-    };
-    if (
-      !canPlaceInSlot(childType, destinationSlot, {
-        rackWidth: targetRack.width,
-        containerHeightUnits: deviceType.u_height,
-        containerSlots: deviceType.slots,
-      })
-    ) {
-      return false;
-    }
-    if (
-      declaredSlot &&
-      child.position + childType.u_height >
-        effectiveSlotHeightUnits(declaredSlot, {
-          containerHeightUnits: deviceType.u_height,
-          containerSlots: deviceType.slots,
-        })
-    ) {
-      return false;
-    }
-  }
-
-  // Validate placement in target rack (no excludeIndex — device isn't in target rack yet)
   if (
-    !canPlaceDevice(
+    !canMoveRackAssemblyToRack(
+      sourceRack,
       targetRack,
       layout.device_types,
-      deviceType.u_height,
-      positionInternal,
-      undefined,
+      deviceIndex,
+      newPosition,
       effectiveFace,
-      undefined,
-      deviceType,
-      assemblyDepthMm,
     )
   ) {
     return false;
   }
+
+  const children = sourceRack.devices.filter(
+    (child) => child.container_id === device.id,
+  );
 
   const parentSnapshot = snapshotDevice(device);
   const childrenSnapshots = children.map((child) => snapshotDevice(child));

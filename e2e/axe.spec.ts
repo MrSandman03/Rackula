@@ -31,6 +31,7 @@ import {
   clickSettings,
   runPaletteCommand,
   locators,
+  PLATFORM_MODIFIER,
 } from "./helpers";
 import { expectNoA11yViolations } from "./helpers/a11y";
 
@@ -66,6 +67,40 @@ test.describe("axe accessibility scans", () => {
     // chrome, and the panel at once: the states a user is most often in.
     await selectDevice(page, 0);
     await expectNoA11yViolations(page);
+  });
+
+  test("populated RackMate carrier controls have no nested buttons or WCAG 2.2 AA violations", async ({
+    page,
+  }) => {
+    await page.keyboard.press(`${PLATFORM_MODIFIER}+k`);
+    await page.getByTestId("command-palette-input").fill("rackmate");
+    await page
+      .getByTestId("command-palette-item-new-layout-template-rackmate-t1-plus")
+      .click();
+
+    const carrier = page.locator(
+      '[data-testid="rack-device"][data-device-uuid="dev-ucg-tray-u1"]',
+    );
+    await expect(carrier).toHaveAttribute("role", "group");
+    await expect(carrier.locator(":scope > .device-rect")).toHaveAttribute(
+      "role",
+      "button",
+    );
+
+    const child = carrier.getByRole("button", {
+      name: /UCG-Max, 0\.5U network, mounted in/,
+    });
+    await expect(child).toBeVisible();
+    expect(
+      await child.evaluate(
+        (element) => element.parentElement?.closest('[role="button"]') === null,
+      ),
+    ).toBe(true);
+
+    await expectNoA11yViolations(
+      page,
+      '[data-testid="rack-device"][data-device-uuid="dev-ucg-tray-u1"]',
+    );
   });
 
   test("side panel View tab has no WCAG 2.2 AA violations", async ({

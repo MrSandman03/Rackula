@@ -10,6 +10,7 @@ import {
   moveSelectedDeviceDown,
   duplicateSelection,
   flipSelectedDeviceFace,
+  isSelectedDeviceContainerChild,
 } from "$lib/actions/selection-actions";
 import { createTestDeviceType, createTestDeviceTypeInput } from "./factories";
 import { toInternalUnits } from "$lib/utils/position";
@@ -116,6 +117,7 @@ describe("selection-actions", () => {
       const child = layout.activeRack!.devices[1]!;
 
       getSelectionStore().selectDevice(rack.id, child.id);
+      expect(isSelectedDeviceContainerChild()).toBe(true);
 
       const posBefore = child.position;
       moveSelectedDeviceUp();

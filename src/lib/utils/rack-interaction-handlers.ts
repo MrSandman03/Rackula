@@ -76,6 +76,17 @@ export function handleDragOver(
 
   const svg = event.currentTarget as SVGSVGElement;
   const excludeIndex = isInternalMove ? dragData.sourceIndex : undefined;
+  const sourceRack =
+    dragData.type === "rack-device" &&
+    dragData.sourceRackId &&
+    dragData.sourceRackId !== rack.id &&
+    dragData.sourceIndex !== undefined
+      ? ctx.layoutStore.getRackById(dragData.sourceRackId)
+      : undefined;
+  const assemblySource =
+    sourceRack && dragData.sourceIndex !== undefined
+      ? { rack: sourceRack, deviceIndex: dragData.sourceIndex }
+      : undefined;
 
   const result = resolveDropTarget(
     { svgElement: svg, clientX: event.clientX, clientY: event.clientY },
@@ -85,6 +96,7 @@ export function handleDragOver(
     dragData.device,
     ctx.getFaceFilter(),
     excludeIndex,
+    assemblySource,
   );
 
   ctx.setContainerHoverInfo(result.containerHoverInfo);
@@ -133,6 +145,12 @@ export function handleDrop(event: DragEvent, ctx: RackHandlerContext): void {
   const deviceLibrary = ctx.getDeviceLibrary();
   const faceFilter = ctx.getFaceFilter();
   const svg = event.currentTarget as SVGSVGElement;
+  const sourceRack =
+    dragData.type === "rack-device" &&
+    dragData.sourceRackId &&
+    dragData.sourceRackId !== rack.id
+      ? ctx.layoutStore.getRackById(dragData.sourceRackId)
+      : undefined;
 
   const action = resolveDropAction(
     { svgElement: svg, clientX: event.clientX, clientY: event.clientY },
@@ -142,6 +160,7 @@ export function handleDrop(event: DragEvent, ctx: RackHandlerContext): void {
     dragData,
     faceFilter,
     false,
+    sourceRack,
   );
 
   // Container drops need special handling for source removal and fallback
@@ -175,6 +194,7 @@ export function handleDrop(event: DragEvent, ctx: RackHandlerContext): void {
       dragData,
       faceFilter,
       true, // skip container detection
+      sourceRack,
     );
     dispatchDropAction(fallbackAction, ctx.getEventCallbacks(), {
       rack,
@@ -182,6 +202,7 @@ export function handleDrop(event: DragEvent, ctx: RackHandlerContext): void {
       faceFilter,
       toastStore: ctx.toastStore,
       layoutStore: ctx.layoutStore,
+      sourceRack,
     });
     return;
   }
@@ -192,6 +213,7 @@ export function handleDrop(event: DragEvent, ctx: RackHandlerContext): void {
     faceFilter,
     toastStore: ctx.toastStore,
     layoutStore: ctx.layoutStore,
+    sourceRack,
   });
 }
 

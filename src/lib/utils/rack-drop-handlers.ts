@@ -58,6 +58,8 @@ export interface DropDispatchContext {
   coords?: DropCoordinateInput;
   /** Required for container-drop fallback re-resolution. */
   dims?: RackDimensions;
+  /** Source rack for validating a cross-rack assembly fallback. */
+  sourceRack?: Rack;
 }
 
 /**
@@ -138,6 +140,7 @@ export function dispatchDropAction(
           action.dragData,
           collisionContext.faceFilter,
           true, // skip container detection
+          collisionContext.sourceRack,
         );
         dispatchDropAction(fallbackAction, callbacks, collisionContext);
       }

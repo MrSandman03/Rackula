@@ -7,6 +7,12 @@ import {
   getDropFeedback,
 } from "$lib/utils/dragdrop";
 import { toInternalUnits } from "$lib/utils/position";
+import {
+  resolveDropAction,
+  resolveDropTarget,
+  type DropCoordinateInput,
+  type RackDimensions,
+} from "$lib/utils/rack-drop-coordinator";
 import { getLayoutStore, resetLayoutStore } from "$lib/stores/layout.svelte";
 import { resetHistoryStore } from "$lib/stores/history.svelte";
 import { createTestContainerType, createTestDeviceType } from "./factories";
@@ -326,6 +332,118 @@ describe("DnD Between Racks", () => {
         3,
       );
       expect(feedback).toBe("valid");
+    });
+  });
+
+  describe("Cross-rack assembly preview agreement", () => {
+    const dims: RackDimensions = {
+      rackHeight: 12,
+      rackWidth: 220,
+      interiorWidth: 186,
+      uHeight: 22,
+      rackPadding: 0,
+      railWidth: 17,
+    };
+    const svgElement = {
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        width: 220,
+        height: 264,
+      }),
+      viewBox: {
+        baseVal: { x: 0, y: 0, width: 220, height: 264 },
+      },
+    } as unknown as SVGSVGElement;
+    const coords: DropCoordinateInput = {
+      svgElement,
+      clientX: 100,
+      clientY: 200,
+    };
+    const carrier = createTestContainerType({
+      slug: "portable-carrier",
+      u_height: 1,
+      rack_widths: [10, 19],
+      is_full_depth: false,
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+      ],
+    });
+    const deepChild: DeviceType = {
+      ...createTestDeviceType({
+        slug: "deep-portable-child",
+        rack_widths: [10, 19],
+        slot_width: 2,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 300, height: 40 },
+        },
+      },
+    };
+    const sourceRack: Rack = {
+      ...targetRack,
+      id: "source-rack",
+      depth_mm: 1000,
+      devices: [
+        pd("carrier", carrier.slug, 1, "front"),
+        {
+          ...pd("deep-child", deepChild.slug, 1, "front"),
+          position: 0,
+          container_id: "carrier",
+          slot_id: "main",
+        },
+      ],
+    };
+    const shallowTarget: Rack = {
+      ...targetRack,
+      id: "target-rack",
+      width: 10,
+      depth_mm: 260,
+      devices: [],
+    };
+    const library = [carrier, deepChild];
+    const dragData = createRackDeviceDragData(carrier, sourceRack.id!, 0);
+
+    it("blocks the preview when a child makes the assembly too deep", () => {
+      const result = resolveDropTarget(
+        coords,
+        dims,
+        shallowTarget,
+        library,
+        carrier,
+        "front",
+        undefined,
+        { rack: sourceRack, deviceIndex: 0 },
+      );
+
+      expect(result.feedback).toBe("blocked");
+      expect(result.dropPreview.feedback).toBe("blocked");
+    });
+
+    it("resolves the same rejected assembly to an invalid action", () => {
+      const action = resolveDropAction(
+        coords,
+        dims,
+        shallowTarget,
+        library,
+        dragData,
+        "front",
+        false,
+        sourceRack,
+      );
+
+      expect(action).toMatchObject({
+        kind: "invalid",
+        feedback: "blocked",
+        message: "Device assembly doesn't fit this rack",
+      });
     });
   });
 

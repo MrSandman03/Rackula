@@ -21,7 +21,10 @@
   import { getUIStore } from "$lib/stores/ui.svelte";
   import { getPlacementStore } from "$lib/stores/placement.svelte";
   import { getStorageMode } from "$lib/storage";
-  import { canMoveSelectedDeviceSlot } from "$lib/actions/selection-actions";
+  import {
+    canMoveSelectedDeviceSlot,
+    isSelectedDeviceContainerChild,
+  } from "$lib/actions/selection-actions";
   import {
     getPaletteSearchCommands,
     getPaletteEmptyState,
@@ -83,6 +86,7 @@
     hasMultipleRacks: layoutStore.rackCount >= 2,
     mode: getStorageMode(),
     canMoveDeviceSlot: canMoveSelectedDeviceSlot(),
+    isContainerChildSelected: isSelectedDeviceContainerChild(),
     readOnly: uiStore.readOnly,
   });
 
