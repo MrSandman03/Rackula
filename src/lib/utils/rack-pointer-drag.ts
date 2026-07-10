@@ -157,11 +157,19 @@ export function attachPointerDragListeners(
     ctx.onDragFinished();
   }
 
+  function handleDragCancel() {
+    // Pointer cancellation is not a drop. Clear every rack listener's local
+    // preview and carrier hover state without resolving or dispatching an action.
+    ctx.setDropPreview(null);
+    ctx.setContainerHoverInfo(null);
+  }
+
   document.addEventListener(
     "rackula:dragmove",
     handleDragMove as EventListener,
   );
   document.addEventListener("rackula:dragend", handleDragEnd as EventListener);
+  document.addEventListener("rackula:dragcancel", handleDragCancel);
 
   return () => {
     document.removeEventListener(
@@ -172,5 +180,6 @@ export function attachPointerDragListeners(
       "rackula:dragend",
       handleDragEnd as EventListener,
     );
+    document.removeEventListener("rackula:dragcancel", handleDragCancel);
   };
 }

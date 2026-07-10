@@ -512,7 +512,7 @@ describe("DnD Between Racks", () => {
       const moved = findDevice(store.getRackById(rackB.id)!, serverType.slug);
       expect(moved).toBeDefined();
       expect(moved!.position).toBe(toInternalUnits(10));
-      expect(moved!.face).toBe("front");
+      expect(moved!.face).toBe("both");
     });
 
     it("undoes cross-rack move back to source rack", () => {
@@ -547,12 +547,21 @@ describe("DnD Between Racks", () => {
       ).toBeDefined();
     });
 
-    it("assigns face from drop target", () => {
-      store.placeDevice(rackA.id, serverType.slug, 5);
+    it("assigns the drop target face to a half-depth device", () => {
+      const halfDepthType = createTestDeviceType({
+        slug: "half-depth-server",
+        u_height: 2,
+        is_full_depth: false,
+      });
+      store.addDeviceTypeRaw(halfDepthType);
+      store.placeDevice(rackA.id, halfDepthType.slug, 5);
 
       store.moveDeviceToRack(rackA.id, 0, rackB.id, 10, "rear");
 
-      const moved = findDevice(store.getRackById(rackB.id)!, serverType.slug);
+      const moved = findDevice(
+        store.getRackById(rackB.id)!,
+        halfDepthType.slug,
+      );
       expect(moved!.face).toBe("rear");
     });
 

@@ -375,6 +375,7 @@ export function moveDeviceToSlot(
       container.id,
       child.slot_id,
       next.slotId,
+      child.position,
       adapter,
       deviceName,
     ),
@@ -824,10 +825,12 @@ export function moveDeviceToRack(
   );
   if (!deviceType) return false;
 
-  // Resolve face: use provided face, or infer from device type
+  // Full-depth equipment always occupies both faces, even when the drop came
+  // from a single-face rack view. Half-depth equipment follows the drop face.
   const effectiveFace: DeviceFace =
-    face ??
-    (deviceType.is_full_depth !== false ? "both" : (device.face ?? "front"));
+    deviceType.is_full_depth !== false
+      ? "both"
+      : (face ?? device.face ?? "front");
   const positionInternal = toInternalUnits(newPosition);
 
   if (

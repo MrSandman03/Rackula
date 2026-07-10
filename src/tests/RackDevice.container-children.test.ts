@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
 import Rack from "$lib/components/Rack.svelte";
 import RackDevice from "$lib/components/RackDevice.svelte";
@@ -21,7 +21,14 @@ const carrierType: DeviceType = {
       id: "main",
       name: "Main",
       position: { row: 0, col: 0 },
-      width_fraction: 1,
+      width_fraction: 0.5,
+      height_units: 1,
+    },
+    {
+      id: "secondary",
+      name: "Secondary",
+      position: { row: 0, col: 1 },
+      width_fraction: 0.5,
       height_units: 1,
     },
   ],
@@ -32,6 +39,7 @@ const childType = createTestDeviceType({
   model: "UCG-Max",
   category: "network",
   u_height: 0.5,
+  slot_width: 1,
 });
 
 function renderOccupiedCarrier(onselect = vi.fn()) {
@@ -316,6 +324,68 @@ describe("RackDevice container children", () => {
     expect(onselect).toHaveBeenCalledOnce();
   });
 
+  it("broadcasts child drag cancellation without committing a drop", () => {
+    const { childButton, onselect } = renderOccupiedCarrier();
+    const onCancel = vi.fn();
+    const onEnd = vi.fn();
+    document.addEventListener("rackula:dragcancel", onCancel);
+    document.addEventListener("rackula:dragend", onEnd);
+    const pointer = {
+      bubbles: true,
+      isPrimary: true,
+      pointerId: 12,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 20,
+      clientY: 20,
+    };
+
+    childButton.dispatchEvent(new PointerEvent("pointerdown", pointer));
+    childButton.dispatchEvent(
+      new PointerEvent("pointermove", { ...pointer, clientX: 40 }),
+    );
+    childButton.dispatchEvent(
+      new PointerEvent("pointercancel", { ...pointer, clientX: 40 }),
+    );
+
+    document.removeEventListener("rackula:dragcancel", onCancel);
+    document.removeEventListener("rackula:dragend", onEnd);
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onEnd).not.toHaveBeenCalled();
+    expect(onselect).not.toHaveBeenCalled();
+  });
+
+  it("broadcasts carrier drag cancellation without committing a drop", () => {
+    const { carrierButton, onselect } = renderOccupiedRackDevice();
+    const onCancel = vi.fn();
+    const onEnd = vi.fn();
+    document.addEventListener("rackula:dragcancel", onCancel);
+    document.addEventListener("rackula:dragend", onEnd);
+    const pointer = {
+      bubbles: true,
+      isPrimary: true,
+      pointerId: 13,
+      pointerType: "mouse",
+      button: 0,
+      clientX: 20,
+      clientY: 20,
+    };
+
+    carrierButton.dispatchEvent(new PointerEvent("pointerdown", pointer));
+    carrierButton.dispatchEvent(
+      new PointerEvent("pointermove", { ...pointer, clientX: 40 }),
+    );
+    carrierButton.dispatchEvent(
+      new PointerEvent("pointercancel", { ...pointer, clientX: 40 }),
+    );
+
+    document.removeEventListener("rackula:dragcancel", onCancel);
+    document.removeEventListener("rackula:dragend", onEnd);
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onEnd).not.toHaveBeenCalled();
+    expect(onselect).not.toHaveBeenCalled();
+  });
+
   it.each(["mouse", "pen"])(
     "ignores a secondary %s pointer without selecting or dragging",
     async (pointerType) => {
@@ -360,11 +430,64 @@ describe("RackDevice container children", () => {
     expect(oncontextmenuopen.mock.calls[0]?.[0].detail).toEqual({
       rackId: expect.any(String),
       deviceIndex: 1,
+      deviceId: "child-1",
       x: 40,
       y: 50,
     });
     expect(onselect).not.toHaveBeenCalled();
     expect(onMove).not.toHaveBeenCalled();
+  });
+
+  it("positions a keyboard child context menu from the child bounds", async () => {
+    const { childButton, oncontextmenuopen } = renderOccupiedRackDevice();
+    vi.spyOn(childButton, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 40,
+      bottom: 20,
+      width: 40,
+      height: 20,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    await fireEvent.contextMenu(childButton, { clientX: 0, clientY: 0 });
+
+    expect(oncontextmenuopen).toHaveBeenCalledOnce();
+    expect(oncontextmenuopen.mock.calls[0]?.[0].detail).toMatchObject({
+      deviceIndex: 1,
+      deviceId: "child-1",
+      x: 20,
+      y: 10,
+    });
+  });
+
+  it("shows only actionable carrier-child context commands", async () => {
+    const { childButton } = renderOccupiedCarrier();
+
+    await fireEvent.contextMenu(childButton, { clientX: 40, clientY: 50 });
+
+    const menu = await screen.findByTestId("ctx-menu");
+    expect(within(menu).getByRole("menuitem", { name: "Edit" })).toBeVisible();
+    expect(
+      within(menu).getByRole("menuitem", { name: "Move to next cell" }),
+    ).toBeVisible();
+    expect(
+      within(menu).getByRole("menuitem", { name: /^Delete/ }),
+    ).toBeVisible();
+    expect(
+      within(menu).queryByRole("menuitem", { name: /^Duplicate/ }),
+    ).toBeNull();
+    expect(
+      within(menu).queryByRole("menuitem", { name: /^Move Up/ }),
+    ).toBeNull();
+    expect(
+      within(menu).queryByRole("menuitem", { name: /^Move Down/ }),
+    ).toBeNull();
+    expect(
+      within(menu).queryByRole("menuitem", { name: "Flip face" }),
+    ).toBeNull();
   });
 
   it("keeps the carrier context menu bound to the assembly index", async () => {
@@ -374,6 +497,9 @@ describe("RackDevice container children", () => {
 
     expect(oncontextmenuopen).toHaveBeenCalledOnce();
     expect(oncontextmenuopen.mock.calls[0]?.[0].detail.deviceIndex).toBe(0);
+    expect(oncontextmenuopen.mock.calls[0]?.[0].detail.deviceId).toBe(
+      "carrier-1",
+    );
   });
 
   it("ignores a non-primary child pointer", () => {

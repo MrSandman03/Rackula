@@ -653,14 +653,16 @@ export function createDetachContainerCommand(
 
 /**
  * Create a command to move a contained child to a different cell of the same
- * carrier. Only slot_id changes; container_id is preserved, so the child stays
- * inside its carrier and is never ejected (contained-device guard, #2146).
+ * carrier. The child position is normalized to the bottom of the new cell while
+ * container_id is preserved, so the child stays inside its carrier and is never
+ * ejected (contained-device guard, #2146).
  */
 export function createMoveToSlotCommand(
   index: number,
   containerId: string,
   oldSlotId: string | undefined,
   newSlotId: string,
+  oldPosition: number,
   store: DeviceCommandStore,
   deviceName: string = "device",
 ): Command {
@@ -673,6 +675,7 @@ export function createMoveToSlotCommand(
     execute() {
       const targetIndex = resolveTargetIndex();
       if (targetIndex === undefined) return;
+      store.moveDeviceRaw(targetIndex, 0);
       store.updateDeviceContainerLinkageRaw(
         targetIndex,
         containerId,
@@ -687,6 +690,7 @@ export function createMoveToSlotCommand(
         containerId,
         oldSlotId,
       );
+      store.moveDeviceRaw(targetIndex, oldPosition);
     },
   };
 }

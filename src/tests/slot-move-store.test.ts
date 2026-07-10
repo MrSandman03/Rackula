@@ -82,6 +82,65 @@ describe("moveDeviceToSlot (store)", () => {
     expect(restored.container_id).toBe(carrierId);
   });
 
+  it("normalizes the child position for a shorter cell and restores it on undo", () => {
+    const { store, rackId } = setupRack();
+    const carrierType = {
+      slug: "mixed-height-carrier",
+      model: "Mixed Height Carrier",
+      category: "shelf" as const,
+      colour: "#555555",
+      u_height: 2,
+      slots: [
+        {
+          id: "tall",
+          position: { row: 0, col: 0 },
+          width_fraction: 0.5,
+          height_units: 2,
+        },
+        {
+          id: "short",
+          position: { row: 0, col: 1 },
+          width_fraction: 0.5,
+          height_units: 1,
+        },
+      ],
+    };
+    const childType = {
+      slug: "mixed-height-child",
+      model: "Mixed Height Child",
+      category: "network" as const,
+      colour: "#336699",
+      u_height: 1,
+      slot_width: 1 as const,
+    };
+    store.addDeviceTypeRaw(carrierType);
+    store.addDeviceTypeRaw(childType);
+    expect(store.placeDevice(rackId, carrierType.slug, 1)).toBe(true);
+    const carrier = store.rack!.devices.find(
+      (device) => device.device_type === carrierType.slug,
+    )!;
+    expect(
+      store.placeInContainer(rackId, childType.slug, carrier.id, "tall", 1),
+    ).toBe(true);
+    const index = store.rack!.devices.findIndex(
+      (device) => device.device_type === childType.slug,
+    );
+    const childId = store.rack!.devices[index]!.id;
+
+    expect(store.moveDeviceToSlot(rackId, index)).toBe(true);
+
+    const moved = store.rack!.devices.find((device) => device.id === childId)!;
+    expect(moved.slot_id).toBe("short");
+    expect(moved.position).toBe(0);
+    expect(store.undo()).toBe(true);
+
+    const restored = store.rack!.devices.find(
+      (device) => device.id === childId,
+    )!;
+    expect(restored.slot_id).toBe("tall");
+    expect(restored.position).toBe(1);
+  });
+
   it("returns false when every other cell of the carrier is occupied", () => {
     const { store, rackId } = setupRack();
     const dt = addHalfWidth(store);

@@ -34,6 +34,7 @@
   import { getSelectionStore } from "$lib/stores/selection.svelte";
   import { getCanvasStore } from "$lib/stores/canvas.svelte";
   import { getBlockedSlots } from "$lib/utils/blocked-slots";
+  import { isContainerChild } from "$lib/utils/collision";
   import { isChristmas } from "$lib/utils/christmas";
   import { getViewportStore } from "$lib/utils/viewport.svelte";
   import { getPlacementStore } from "$lib/stores/placement.svelte";
@@ -54,7 +55,10 @@
     NAME_Y_OFFSET as NAME_Y_OFFSET_CONST,
   } from "$lib/constants/layout";
   import { type RackDimensions } from "$lib/utils/rack-drop-coordinator";
-  import { createContextMenuActions } from "$lib/utils/rack-context-actions";
+  import {
+    createContextMenuActions,
+    type ContextMenuTarget,
+  } from "$lib/utils/rack-context-actions";
   import { type RackEventCallbacks } from "$lib/utils/rack-drop-handlers";
   import {
     handleDragOver as onDragOver,
@@ -164,12 +168,7 @@
 
   // --- Context menu state ---
   let contextMenuOpen = $state(false);
-  let contextMenuTarget = $state<{
-    rackId: string;
-    deviceIndex: number;
-    x: number;
-    y: number;
-  } | null>(null);
+  let contextMenuTarget = $state<ContextMenuTarget | null>(null);
 
   // Cleanup timeout on unmount
   $effect(() => {
@@ -234,6 +233,24 @@
       contextMenuOpen = s.open;
       contextMenuTarget = s.target;
     },
+  );
+
+  const contextMenuDevice = $derived(
+    contextMenuTarget
+      ? rack.devices.find((device) => device.id === contextMenuTarget?.deviceId)
+      : undefined,
+  );
+  const contextMenuTargetsChild = $derived(
+    contextMenuDevice ? isContainerChild(contextMenuDevice) : false,
+  );
+  const contextMenuCanMoveToNextSlot = $derived(
+    contextMenuTarget && contextMenuTargetsChild
+      ? contextActions.getCanMoveToNextSlot(
+          rack,
+          deviceLibrary,
+          contextMenuTarget,
+        )
+      : false,
   );
 
   // --- Derived data for rendering ---
@@ -569,6 +586,7 @@
               onduplicate={(e) =>
                 contextActions.handleDuplicate(rack, {
                   ...e.detail,
+                  deviceId: placedDevice.id,
                   x: 0,
                   y: 0,
                 })}
@@ -618,27 +636,33 @@
 </div>
 
 <!-- Device context menu (rendered outside SVG for proper DOM layering) -->
-{#if contextMenuOpen && contextMenuTarget}
+{#if contextMenuOpen && contextMenuTarget && contextMenuDevice}
   <DeviceContextMenu
     open={contextMenuOpen}
     x={contextMenuTarget.x}
     y={contextMenuTarget.y}
     onedit={() => ctxMenu.handleEdit(rack)}
-    onduplicate={() => ctxMenu.handleDuplicate(rack)}
-    onmoveup={() => ctxMenu.handleMoveUp(rack, deviceLibrary)}
-    onmovedown={() => ctxMenu.handleMoveDown(rack)}
-    onflip={() => ctxMenu.handleFlip(rack)}
+    onduplicate={contextMenuTargetsChild
+      ? undefined
+      : () => ctxMenu.handleDuplicate(rack)}
+    onmoveup={contextMenuTargetsChild
+      ? undefined
+      : () => ctxMenu.handleMoveUp(rack, deviceLibrary)}
+    onmovedown={contextMenuTargetsChild
+      ? undefined
+      : () => ctxMenu.handleMoveDown(rack)}
+    onflip={contextMenuTargetsChild
+      ? undefined
+      : () => ctxMenu.handleFlip(rack)}
+    onmoveslot={contextMenuCanMoveToNextSlot
+      ? () => ctxMenu.handleMoveToNextSlot()
+      : undefined}
     ondelete={() => ctxMenu.handleDelete()}
-    canMoveUp={contextActions.getCanMoveUp(
-      rack,
-      deviceLibrary,
-      contextMenuTarget.deviceIndex,
-    )}
-    canMoveDown={contextActions.getCanMoveDown(
-      rack,
-      deviceLibrary,
-      contextMenuTarget.deviceIndex,
-    )}
+    containerChild={contextMenuTargetsChild}
+    canMoveUp={!contextMenuTargetsChild &&
+      contextActions.getCanMoveUp(rack, deviceLibrary, contextMenuTarget)}
+    canMoveDown={!contextMenuTargetsChild &&
+      contextActions.getCanMoveDown(rack, deviceLibrary, contextMenuTarget)}
     onOpenChange={(open) => {
       if (!open) ctxMenu.close();
     }}

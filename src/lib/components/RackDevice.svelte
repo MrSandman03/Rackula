@@ -100,6 +100,7 @@
       event: CustomEvent<{
         rackId: string;
         deviceIndex: number;
+        deviceId: string;
         x: number;
         y: number;
       }>,
@@ -452,10 +453,42 @@
     emitSelection(child.id, childType.slug, child.position);
   }
 
-  function handleChildContextMenu(event: MouseEvent, originalIndex: number) {
+  function getContextMenuCoordinates(
+    event: MouseEvent,
+    element: Element | null,
+  ): { x: number; y: number } {
+    let x = event.clientX;
+    let y = event.clientY;
+    if (element) {
+      const rect = element.getBoundingClientRect();
+      if (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        ((x === 0 && y === 0) ||
+          x < rect.left ||
+          x > rect.right ||
+          y < rect.top ||
+          y > rect.bottom)
+      ) {
+        x = rect.left + rect.width / 2;
+        y = rect.top + rect.height / 2;
+      }
+    }
+    return { x, y };
+  }
+
+  function handleChildContextMenu(
+    event: MouseEvent,
+    child: PlacedDevice,
+    originalIndex: number,
+  ) {
     event.preventDefault();
     event.stopPropagation();
-    openDeviceContextMenu(event.clientX, event.clientY, originalIndex);
+    const { x, y } = getContextMenuCoordinates(
+      event,
+      event.currentTarget as Element,
+    );
+    openDeviceContextMenu(x, y, originalIndex, child.id);
   }
 
   function handleChildPointerDown(event: PointerEvent, child: PlacedDevice) {
@@ -596,6 +629,7 @@
       // The browser may already have released capture while cancelling.
     }
     if (childPointerState === "dragging") {
+      document.dispatchEvent(new CustomEvent("rackula:dragcancel"));
       setCurrentDragData(null);
       hideDragTooltip();
       ondragendProp?.();
@@ -744,6 +778,7 @@
 
     // Cancel any in-progress drag
     if (pointerState === "dragging") {
+      document.dispatchEvent(new CustomEvent("rackula:dragcancel"));
       setCurrentDragData(null);
       isDragging = false;
       hideDragTooltip();
@@ -760,7 +795,13 @@
     x: number,
     y: number,
     targetDeviceIndex: number = deviceIndex,
+    targetDeviceId: string | undefined = placedDeviceId,
   ) {
+    const deviceId =
+      targetDeviceId ??
+      layoutStore.getRackById(rackId)?.devices[targetDeviceIndex]?.id;
+    if (!deviceId) return;
+
     // If context menu handler is provided, use it; otherwise fall back to duplicate
     if (oncontextmenuopen) {
       oncontextmenuopen(
@@ -768,6 +809,7 @@
           detail: {
             rackId,
             deviceIndex: targetDeviceIndex,
+            deviceId,
             x,
             y,
           },
@@ -802,17 +844,8 @@
   function handleContextMenu(event: MouseEvent) {
     event.preventDefault();
     event.stopPropagation();
-    // Use element bounds as fallback when clientX/Y are outside the device
-    // (panzoom transforms can distort coordinates for half-width devices)
-    let x = event.clientX;
-    let y = event.clientY;
-    if (groupElement) {
-      const rect = groupElement.getBoundingClientRect();
-      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
-        x = rect.left + rect.width / 2;
-        y = rect.top + rect.height / 2;
-      }
-    }
+    // Bounds fallback covers keyboard-triggered events and transformed SVGs.
+    const { x, y } = getContextMenuCoordinates(event, groupElement);
     openDeviceContextMenu(x, y);
   }
 
@@ -1059,7 +1092,7 @@
             data-testid="container-child-device"
             onclick={(event) => handleChildClick(event, child, childType)}
             oncontextmenu={(event) =>
-              handleChildContextMenu(event, originalIndex)}
+              handleChildContextMenu(event, child, originalIndex)}
             onpointerdown={(event) => handleChildPointerDown(event, child)}
             onpointermove={(event) =>
               handleChildPointerMove(event, child, childType, originalIndex)}
