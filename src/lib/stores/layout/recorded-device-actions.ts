@@ -516,6 +516,7 @@ export function removeDeviceRecorded(
     adapter,
     deviceName,
     layout.metadata?.id ?? "",
+    layout.cables?.map((cable) => ({ ...cable })) ?? [],
   );
   history.execute(bindCommandToRack(ctx, rackId, command));
   ctx.markDirty();

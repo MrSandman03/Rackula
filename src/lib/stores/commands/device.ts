@@ -3,7 +3,7 @@
  */
 
 import type { Command, CommandType } from "./types";
-import type { PlacedDevice, DeviceFace } from "$lib/types";
+import type { Cable, PlacedDevice, DeviceFace } from "$lib/types";
 import type { RackCommandStore } from "./rack";
 import { getImageStore } from "../images.svelte";
 import { placementKey } from "$lib/utils/placement-key";
@@ -221,9 +221,15 @@ export function createRemoveDeviceCommand(
 export type DeviceAssemblyCommandStore = Pick<
   RackCommandStore,
   "restoreRackDevicesRaw"
->;
+> & {
+  addCableRaw(cable: Cable): void;
+  removeCableRaw(id: string): void;
+};
 
-export type RackDevicesTransitionStore = DeviceAssemblyCommandStore &
+export type RackDevicesTransitionStore = Pick<
+  RackCommandStore,
+  "restoreRackDevicesRaw"
+> &
   Pick<CrossRackMoveStore, "setActiveRackId" | "getActiveRackId">;
 
 export interface RackDevicesTransitionOptions {
@@ -449,10 +455,19 @@ export function createRemoveDeviceAssemblyCommand(
   store: DeviceAssemblyCommandStore,
   deviceName: string = "device",
   layoutId: string = "",
+  beforeCables: Cable[] = [],
 ): Command {
   const beforeCopy = structuredClone(beforeDevices);
   const afterCopy = structuredClone(afterDevices);
   const removedCopies = structuredClone(removedDevices);
+  const beforeCableCopy = structuredClone(beforeCables);
+  const removedDeviceIds = new Set(removedCopies.map((device) => device.id));
+  const afterCableCopy = beforeCableCopy.filter(
+    (cable) =>
+      !removedDeviceIds.has(cable.a_device_id) &&
+      !removedDeviceIds.has(cable.b_device_id),
+  );
+  const snapshotCableIds = new Set(beforeCableCopy.map((cable) => cable.id));
   const imageSnapshots = removedCopies.map((device) => {
     const snapshot = getImageStore()
       .getAllImages()
@@ -463,11 +478,22 @@ export function createRemoveDeviceAssemblyCommand(
     };
   });
 
+  function restoreCables(cables: Cable[]): void {
+    // Rebuild the snapshot set so undo restores the original cable ordering.
+    for (const id of snapshotCableIds) {
+      store.removeCableRaw(id);
+    }
+    for (const cable of cables) {
+      store.addCableRaw(structuredClone(cable));
+    }
+  }
+
   return {
     type: "REMOVE_DEVICE",
     description: `Remove ${deviceName}`,
     timestamp: Date.now(),
     execute() {
+      restoreCables(afterCableCopy);
       store.restoreRackDevicesRaw(structuredClone(afterCopy));
       const imageStore = getImageStore();
       for (const device of removedCopies) {
@@ -476,6 +502,7 @@ export function createRemoveDeviceAssemblyCommand(
     },
     undo() {
       store.restoreRackDevicesRaw(structuredClone(beforeCopy));
+      restoreCables(beforeCableCopy);
       const imageStore = getImageStore();
       for (const snapshot of imageSnapshots) {
         if (snapshot.images?.front) {
