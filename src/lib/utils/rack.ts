@@ -29,6 +29,23 @@ export function generateGroupId(): string {
   return nanoid();
 }
 
+/** Remove scalar rack fields that already equal their persisted value. */
+export function filterUnchangedRackUpdates(
+  rack: Rack,
+  updates: Partial<Omit<Rack, "devices" | "view">>,
+): Partial<Omit<Rack, "devices" | "view">> {
+  const changedUpdates: Partial<Omit<Rack, "devices" | "view">> = {};
+  for (const key of Object.keys(updates) as (keyof Omit<
+    Rack,
+    "devices" | "view"
+  >)[]) {
+    if (updates[key] !== rack[key]) {
+      changedUpdates[key] = updates[key] as never;
+    }
+  }
+  return changedUpdates;
+}
+
 /**
  * Create a new rack with sensible defaults
  * Generates a unique ID using nanoid

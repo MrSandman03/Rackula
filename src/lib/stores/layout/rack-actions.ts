@@ -10,7 +10,7 @@ import { MAX_RACKS } from "$lib/types/constants";
 import { createDefaultRack } from "$lib/utils/serialization";
 import { layoutDebug } from "$lib/utils/debug";
 import { generateId } from "$lib/utils/device";
-import { generateRackId } from "$lib/utils/rack";
+import { filterUnchangedRackUpdates, generateRackId } from "$lib/utils/rack";
 import {
   createAddRackCommand,
   createDeleteRackCommand,
@@ -613,25 +613,32 @@ export function updateRack(
   if (rackIndex === -1) return;
   const rack = ctx.getLayout().racks[rackIndex]!;
   const constrainedUpdates = constrainRackProfileUpdates(rack, updates);
+  const group = getRackGroupForRack(ctx, id);
 
-  // Check if height change on bayed rack
+  // Profile and rail dimensions describe the whole bay. Reject any direct
+  // member update that would make those persisted fields diverge, including a
+  // profile conversion whose constrained height happens to remain unchanged.
+  const bayedInvariantKeys = ["profile", "width", "height"] as const;
   if (
-    constrainedUpdates.height !== undefined &&
-    constrainedUpdates.height !== rack.height
+    group?.layout_preset === "bayed" &&
+    bayedInvariantKeys.some(
+      (key) =>
+        key in constrainedUpdates && constrainedUpdates[key] !== rack[key],
+    )
   ) {
-    const group = getRackGroupForRack(ctx, id);
-    if (group?.layout_preset === "bayed") {
-      layoutDebug.state(
-        "updateRack: rejected height change for bayed rack %s",
-        id,
-      );
-      // Silently reject - UI should show toast
-      return;
-    }
+    layoutDebug.state(
+      "updateRack: rejected per-member profile or rail change for bayed rack %s",
+      id,
+    );
+    // Silently reject - UI should show toast
+    return;
   }
 
   // Handle view separately (doesn't need undo/redo)
-  if (constrainedUpdates.view !== undefined) {
+  if (
+    constrainedUpdates.view !== undefined &&
+    constrainedUpdates.view !== rack.view
+  ) {
     const layout = ctx.getLayout();
     ctx.setLayout({
       ...layout,
@@ -646,8 +653,9 @@ export function updateRack(
   const {
     view: _view,
     devices: _devices,
-    ...recordableUpdates
+    ...candidateUpdates
   } = constrainedUpdates;
+  const recordableUpdates = filterUnchangedRackUpdates(rack, candidateUpdates);
   if (Object.keys(recordableUpdates).length === 0) return;
 
   // BayedRackView renders one shared U-label column read from racks[0], so
@@ -662,11 +670,6 @@ export function updateRack(
       numberingUpdates[key] = recordableUpdates[key] as never;
     }
   }
-
-  const group =
-    Object.keys(numberingUpdates).length > 0
-      ? getRackGroupForRack(ctx, id)
-      : undefined;
 
   if (group?.layout_preset === "bayed" && group.rack_ids.length > 1) {
     // Origin gets the full update; peers only get the numbering keys.
