@@ -91,6 +91,52 @@ export const ABBREV_TO_CATEGORY: Record<string, DeviceCategory> =
     ]),
   ) as Record<string, DeviceCategory>;
 
+export const MAX_SHARE_ACCEPTED_CATEGORIES =
+  Object.keys(CATEGORY_TO_ABBREV).length;
+export const MAX_SHARE_RACK_WIDTHS_PER_DEVICE_TYPE = 4;
+export const MAX_SHARE_FIT_LIST_ITEMS = 256;
+
+const ShareCategoryAbbreviationSchema = z
+  .string()
+  .length(1)
+  .refine((value) => value in ABBREV_TO_CATEGORY, {
+    message: "Unknown device category abbreviation",
+  });
+
+function hasUniqueItems(values: readonly unknown[]): boolean {
+  return new Set(values).size === values.length;
+}
+
+const MinimalFitDimensionsSchema = z
+  .object({
+    width: z.number().finite().optional(),
+    depth: z.number().finite().optional(),
+    height: z.number().finite().optional(),
+    length: z.number().finite().optional(),
+  })
+  .strict();
+
+const MinimalFitSlugListSchema = z
+  .array(z.string().min(1))
+  .max(MAX_SHARE_FIT_LIST_ITEMS);
+
+export const MinimalRackulaFitSchema = z
+  .object({
+    status: z.string().optional(),
+    mount_type: z.string().optional(),
+    recommended_tray_u: z.number().finite().optional(),
+    rackmate_t1_plus_depth_mm: z.number().finite().optional(),
+    rackmate_t1_plus_depth_clearance_mm: z.number().finite().optional(),
+    rack_internal_depth_mm: z.number().finite().optional(),
+    max_planned_child_u: z.number().finite().optional(),
+    dimensions_mm: MinimalFitDimensionsSchema.optional(),
+    reported_dimensions_mm: MinimalFitDimensionsSchema.optional(),
+    recommended_mount_slugs: MinimalFitSlugListSchema.optional(),
+    recommended_tray_slugs: MinimalFitSlugListSchema.optional(),
+    open_checks: z.array(z.string()).max(MAX_SHARE_FIT_LIST_ITEMS).optional(),
+  })
+  .strict();
+
 // =============================================================================
 // Minimal Format Schemas
 // =============================================================================
@@ -138,7 +184,13 @@ export const MinimalSlotSchema = z.object({
   /** height units (optional) */
   hu: z.number().optional(),
   /** accepted device category abbreviations (optional) */
-  a: z.array(z.string().length(1)).optional(),
+  a: z
+    .array(ShareCategoryAbbreviationSchema)
+    .max(MAX_SHARE_ACCEPTED_CATEGORIES)
+    .refine(hasUniqueItems, {
+      message: "Accepted device categories must be unique",
+    })
+    .optional(),
 });
 
 /**
@@ -176,6 +228,10 @@ export const MinimalDeviceTypeSchema = z.object({
     .array(
       z.union([z.literal(10), z.literal(19), z.literal(21), z.literal(23)]),
     )
+    .max(MAX_SHARE_RACK_WIDTHS_PER_DEVICE_TYPE)
+    .refine(hasUniqueItems, {
+      message: "Compatible rack widths must be unique",
+    })
     .optional(),
   /** full-depth collision behavior */
   fd: z.boolean().optional(),
@@ -183,7 +239,7 @@ export const MinimalDeviceTypeSchema = z.object({
   fi: z.literal(1).optional(),
   ri: z.literal(1).optional(),
   /** fit metadata needed for physical placement checks */
-  rf: z.record(z.string(), z.any()).optional(),
+  rf: MinimalRackulaFitSchema.optional(),
   /** compact definition is authoritative (required by format v3) */
   o: z.literal(1).optional(),
 });
@@ -372,3 +428,4 @@ export type MinimalRack = z.infer<typeof MinimalRackSchema>;
 export type MinimalRackV2 = z.infer<typeof MinimalRackV2Schema>;
 export type MinimalRackGroup = z.infer<typeof MinimalRackGroupSchema>;
 export type MinimalLayoutV2 = z.infer<typeof MinimalLayoutV2Schema>;
+export type MinimalRackulaFit = z.infer<typeof MinimalRackulaFitSchema>;

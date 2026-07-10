@@ -31,6 +31,7 @@ import {
   type MinimalDevice,
   type MinimalRackV2,
   type MinimalRackGroup,
+  type MinimalRackulaFit,
 } from "$lib/schemas/share";
 import { LayoutSchema, LegacyShareLayoutSchema } from "$lib/schemas";
 import { VERSION } from "$lib/version";
@@ -84,7 +85,9 @@ function stringList(value: unknown): string[] | undefined {
   return strings.length > 0 ? strings : undefined;
 }
 
-function shareDimensions(value: unknown): Record<string, number> | undefined {
+function shareDimensions(
+  value: unknown,
+): MinimalRackulaFit["dimensions_mm"] | undefined {
   if (!isPlainRecord(value)) return undefined;
   const dimensions = Object.fromEntries(
     ["width", "depth", "height", "length"]
@@ -99,11 +102,11 @@ function shareDimensions(value: unknown): Record<string, number> | undefined {
 /** Keep only public fit fields needed to render and validate shared hardware. */
 function shareSafeRackulaFit(
   deviceType: DeviceType,
-): Record<string, unknown> | undefined {
+): MinimalRackulaFit | undefined {
   const fit = deviceType.custom_fields?.rackula_fit;
   if (!isPlainRecord(fit)) return undefined;
 
-  const result: Record<string, unknown> = {};
+  const result: MinimalRackulaFit = {};
   for (const key of ["status", "mount_type"] as const) {
     if (typeof fit[key] === "string") result[key] = fit[key];
   }

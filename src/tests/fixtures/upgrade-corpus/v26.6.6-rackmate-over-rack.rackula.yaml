@@ -1,0 +1,33 @@
+metadata:
+  id: bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+  name: Legacy RackMate Over-Rack Device
+  schema_version: "1.0"
+version: "26.6.6"
+name: Legacy RackMate Over-Rack Device
+racks:
+  - id: rack-rackmate
+    name: RackMate T1 Plus
+    height: 8
+    width: 10
+    depth_mm: 260
+    desc_units: false
+    show_rear: true
+    form_factor: 4-post-cabinet
+    starting_unit: 1
+    position: 0
+    devices:
+      - id: legacy-over-rack-device
+        device_type: legacy-two-u-device
+        position: 48
+        face: front
+device_types:
+  - slug: legacy-two-u-device
+    model: Legacy Two U Device
+    u_height: 2
+    rack_widths: [10]
+    is_full_depth: false
+    colour: "#425466"
+    category: network
+settings:
+  display_mode: label
+  show_labels_on_images: false

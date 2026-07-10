@@ -120,6 +120,9 @@ describe("upgrade corpus: depth/base-weight defaults (#2738)", () => {
 const legacyRackMateYaml = (
   await import("./fixtures/upgrade-corpus/legacy-rackmate-t1-plus-profile.rackula.yaml?raw")
 ).default as string;
+const legacyRackMateOverRackYaml = (
+  await import("./fixtures/upgrade-corpus/v26.6.6-rackmate-over-rack.rackula.yaml?raw")
+).default as string;
 
 describe("upgrade corpus: legacy RackMate profile inference", () => {
   it("infers the named profile from the exact old YAML signature", async () => {
@@ -132,6 +135,44 @@ describe("upgrade corpus: legacy RackMate profile inference", () => {
       height: 8,
       depth_mm: 260,
     });
+  });
+
+  it("retains the prior-release over-rack clamp after profile inference", async () => {
+    const layout = await parseLayoutYaml(legacyRackMateOverRackYaml);
+
+    expect(layout.racks[0]?.profile).toBe("rackmate-t1-plus");
+    expect(layout.racks[0]?.devices[0]?.position).toBe(42);
+  });
+});
+
+const preStrictChildFitYaml = (
+  await import("./fixtures/upgrade-corpus/v26.6.6-pre-strict-child-fit.rackula.yaml?raw")
+).default as string;
+
+describe("upgrade corpus: fit checks added after v26.6.6", () => {
+  it("loads prior-valid physical-height and rack-width metadata", async () => {
+    const layout = await parseLayoutYaml(preStrictChildFitYaml);
+
+    expect(layout.racks[0]?.devices.map((device) => device.id)).toEqual([
+      "legacy-fit-container",
+      "legacy-tall-child",
+      "legacy-width-child",
+    ]);
+  });
+
+  it("keeps the new fit checks strict at the current authoring boundary", async () => {
+    const parsed = await parseYaml(preStrictChildFitYaml);
+    const result = LayoutSchema.safeParse(parsed);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.message)).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("taller than slot"),
+          expect.stringContaining("not compatible with a 19-inch rack"),
+        ]),
+      );
+    }
   });
 });
 

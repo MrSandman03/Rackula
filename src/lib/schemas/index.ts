@@ -986,16 +986,21 @@ function transformLayoutSchemaInput(
           ...rack,
           id: rack.id ?? nanoid(),
         });
-    const hasFixedRackProfile =
+    const wasLegacyProfileInferred =
+      allowLegacyProfileInference &&
+      rack.profile === undefined &&
       rackWithProfileDefaults.profile === "rackmate-t1-plus";
+    const hasFixedRackProfile =
+      rackWithProfileDefaults.profile === "rackmate-t1-plus" &&
+      !wasLegacyProfileInferred;
 
     return {
       ...rackWithProfileDefaults,
       // Positions are in internal units here; clamp any rail device whose top
       // extends above the rack down to the highest within-rack whole-U (#2661).
-      // Fixed named profiles are stricter: preserve their saved positions so
-      // refinement rejects incompatible contents instead of silently stacking
-      // them at the top. Generic racks retain the prior-release clamp.
+      // Current fixed profiles preserve saved positions so strict refinement
+      // can reject incompatible contents. A profile inferred only at the
+      // prior-release boundary retains the historical over-rack clamp.
       devices: hasFixedRackProfile
         ? migratedDevices
         : clampOverRackPositions(
@@ -1040,7 +1045,7 @@ export const LegacyShareLayoutSchemaBase =
 function addLayoutRefinementIssues(
   data: z.infer<typeof LayoutSchemaBase>,
   ctx: RefinementCtx,
-  allowPriorReleaseSlotFit: boolean,
+  allowPriorReleaseFit: boolean,
 ): void {
   // Validate at least one rack is present
   if (!data.racks || data.racks.length === 0) {
@@ -1145,7 +1150,7 @@ function addLayoutRefinementIssues(
       const device = rack.devices[deviceIndex]!;
       const placedType = resolveDeviceType(device.device_type);
       if (!placedType) {
-        if (!allowPriorReleaseSlotFit) {
+        if (!allowPriorReleaseFit) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: `Device "${device.name ?? device.id}" has no device type definition for "${device.device_type}".`,
@@ -1244,7 +1249,7 @@ function addLayoutRefinementIssues(
 
         // 3b. Child must fit its cell (height_units / width_fraction).
         const slot = slotById.get(device.slot_id)!;
-        const slotForLayoutValidation = allowPriorReleaseSlotFit
+        const slotForLayoutValidation = allowPriorReleaseFit
           ? slotForPriorReleaseOmittedHeightLayoutValidation(
               slot,
               containerType,
@@ -1252,7 +1257,10 @@ function addLayoutRefinementIssues(
           : slot;
         const childForFit = placedType;
         if (childForFit) {
-          if (!isDeviceCompatibleWithRackWidth(childForFit, rack.width)) {
+          if (
+            !allowPriorReleaseFit &&
+            !isDeviceCompatibleWithRackWidth(childForFit, rack.width)
+          ) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
               message: `Device "${device.name ?? device.id}" is not compatible with a ${rack.width}-inch rack.`,
@@ -1269,6 +1277,12 @@ function addLayoutRefinementIssues(
               containerSlots: containerType.slots,
             },
           )) {
+            // Physical-height enforcement was added after v26.6.6. Keep the
+            // baseline-era category, logical height/width, and physical-width
+            // checks at saved-data ingress, while current authoring stays strict.
+            if (allowPriorReleaseFit && issue.code === "physical_height") {
+              continue;
+            }
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
               message: `Device "${device.name ?? device.id}" does not fit slot "${device.slot_id}": ${issue.message}`,
@@ -1301,7 +1315,7 @@ function addLayoutRefinementIssues(
       }
     }
 
-    if (rack.profile === "rackmate-t1-plus") {
+    if (rack.profile === "rackmate-t1-plus" && !allowPriorReleaseFit) {
       const invalidDeviceIndexes = new Set<number>();
       const assemblyDepth = (
         device: (typeof rack.devices)[number],
