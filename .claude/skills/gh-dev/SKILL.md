@@ -134,10 +134,8 @@ START
                     │   Fix all  Commit ────────┘
                     │   findings   │
                     │      │       ▼
-                    └──────┘   Push (pre-push
-                               CodeRabbit --agent
-                               gate; --no-verify
-                               only if transient)
+                    └──────┘   Push (respect all
+                               repository hooks)
                                    │
                                    ▼
                                Create PR
@@ -241,7 +239,7 @@ If not configured, skip or ask user.
 
 **MANDATORY before opening a PR.** Review the diff and resolve findings before pushing.
 
-**Do NOT run the CodeRabbit CLI here.** Repos that gate on CodeRabbit run it at push time via a pre-push hook in agent mode (see 3f). Running it manually first doubles the work.
+The reviewer must not have implemented the change. For high-risk or cross-cutting changes, use at least two independent reviewers.
 
 ```
 ┌─────────────────────────────────────────┐
@@ -268,7 +266,7 @@ If not configured, skip or ask user.
 **Step 1: Run the review (auto-detect)**
 
 - **Preferred:** if a `/code-review` command is available in this environment, use it. It reviews the current diff for correctness bugs plus reuse/simplification/efficiency cleanups.
-- **Fallback:** if `/code-review` is unavailable, use the repo's configured reviewer (check CLAUDE.md `### Review Command`). If none, self-review the diff against the issue's acceptance criteria.
+- **Fallback:** if `/code-review` is unavailable, dispatch a read-only reviewer against the full diff. If no independent reviewer is available, stop and ask the user rather than substituting self-review.
 
 **Step 2: Fix findings**
 
@@ -291,33 +289,13 @@ After fixing, re-run verification commands (lint, test, build), then re-review. 
 Fixes #<N>")
 ```
 
-### 3f. Push (mind the pre-push gate)
+### 3f. Push (respect repository hooks)
 
 ```bash
 (cd "$WORKTREE_DIR" && git push -u origin <branch>)
 ```
 
-Some repos run a **pre-push hook** that gates the push on a CodeRabbit review. Detect a _CodeRabbit_ gate specifically (not just any pre-push hook):
-
-```bash
-HOOK_FILE=""
-[ -f .husky/pre-push ] && HOOK_FILE=".husky/pre-push"
-[ -f .git/hooks/pre-push ] && HOOK_FILE=".git/hooks/pre-push"
-if [ -n "$HOOK_FILE" ] && grep -qi "coderabbit" "$HOOK_FILE"; then
-  echo "CodeRabbit pre-push gate detected"
-fi
-```
-
-When present, the hook runs **CodeRabbit in agent mode** (`coderabbit review --agent`, default-deny) and blocks the push on real findings. The `--no-verify` fallback below applies **only to a CodeRabbit gate**. If a hook runs other checks (tests, lint), do not bypass them blindly.
-
-**If the push is blocked, classify the cause:**
-
-| Cause | What to do |
-| --- | --- |
-| Real review findings reported | Address them (loop back to 3d), then push again. |
-| Timeout, CLI unavailable, or unparseable output (infra failure, not findings) | Retry once with `git push --no-verify` to bypass the gate. |
-
-Only use `--no-verify` for transient/infrastructure failures. **Never** bypass to skip real findings.
+If a repository hook blocks the push, read its output and fix the underlying validation failure before retrying. A transient infrastructure failure may be retried once. Do not use `--no-verify` unless the repository explicitly allows it for the identified failure and the reason is recorded.
 
 ### 3g. Create PR
 
@@ -337,7 +315,8 @@ Closes #<N>")
 
 ```bash
 gh pr checks <PR> --watch
-gh pr merge <PR> --squash --delete-branch --auto
+# Stop and obtain explicit human approval for the reviewed SHA.
+gh pr merge <PR> --squash --delete-branch
 ```
 
 ### 3i. Cleanup
@@ -368,7 +347,7 @@ Check for more issues:
 
 ## Blocker Handling
 
-1. Commit WIP: `git commit -m "wip: partial #<N>" --no-verify && git push --no-verify` (parking incomplete work; the review gate would block it)
+1. Commit WIP: `git commit -m "wip: partial #<N>" && git push`.
 2. Release lock: `gh issue edit <N> --remove-label "in-progress"`
 3. Comment on issue with status, blocker, what was attempted
 4. Stop

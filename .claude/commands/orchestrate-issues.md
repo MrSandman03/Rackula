@@ -1,5 +1,5 @@
 ---
-description: Orchestrate Rackula GitHub issues through to merged PRs via parallel per-issue subagents (worktree-isolated, skill-gated, auto-merge after both bots approve)
+description: Orchestrate Rackula GitHub issues through reviewed PRs via parallel per-issue subagents
 argument-hint: <issue numbers, e.g. 2295 2296 2165>
 ---
 
@@ -27,16 +27,16 @@ If no issue numbers were provided, ask which issues to work before doing anythin
 
 ## Review-feedback loop (mandatory)
 
-When CodeRabbit, CodeAnt, or `/code-review` returns feedback on the PR, invoke `/superpowers:receiving-code-review` to process it. Do NOT performatively agree or blindly apply suggestions — verify each one technically, push back in-thread on false positives with reasoning, and only commit genuine fixes. Re-request review after pushing changes.
+When a reviewer, CI analyzer, or `/code-review` returns feedback on the PR, invoke `/superpowers:receiving-code-review` to process it. Do not performatively agree or blindly apply suggestions. Verify each finding technically, rebut false positives with reasoning, and commit only genuine fixes. Re-request review after pushing changes.
 
-## Merge gate (auto-merge when ALL are true)
+## Merge gate (ALL must be true)
 
 - CI fully green AND `mergeStateStatus` is CLEAN (a DIRTY/conflicted PR silently skips CI — check `gh pr view <N> --json mergeable,mergeStateStatus` before trusting green checks).
-- CodeRabbit has approved with zero open findings — OR is genuinely unavailable (credits exhausted / rate-limited), in which case a clean local `/code-review` is the fallback gate.
-- CodeAnt has approved — OR is not configured as a check on this repo (then skip it).
+- The complete diff has a clean independent review. High-risk or cross-cutting changes have at least two independent reviews.
 - Every review item is resolved or rebutted via `/superpowers:receiving-code-review`.
+- A human has explicitly approved the merge.
 
-When the gate passes: `gh pr merge` (squash), then `gh issue close <N> --comment "Implemented in <commit>"`. Never merge on green CI alone.
+When the gate passes: `gh pr merge` (squash), then `gh issue close <N> --comment "Implemented in <commit>"`. Never merge on green CI alone or without human approval.
 
 ## Orchestration rules
 

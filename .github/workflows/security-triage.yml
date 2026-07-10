@@ -237,9 +237,8 @@ jobs:
       # if the triage step failed (always()), so a crash mid-run is still caught.
       #
       # Caveat: PRs opened with GITHUB_TOKEN do not trigger pull_request CI
-      # workflows (GitHub's recursion guard). CodeRabbit and CodeAnt still review
-      # via their own app webhooks. A maintainer marks the draft ready, or pushes
-      # a commit, to run CI before merge.
+      # workflows (GitHub's recursion guard). A maintainer marks the draft ready,
+      # or pushes a commit, to run CI before merge.
       - name: Ensure a PR exists for every drafted security fix
         if: always() && steps.gate.outputs.has_alerts == 'true'
         env:

@@ -122,45 +122,23 @@ gh issue close <number> --comment "Implemented in <commit-hash>"
 
 See `docs/reference/GITHUB-WORKFLOW.md` for full workflow documentation.
 
-## CodeRabbit Integration
+## Review and Merge Gate
 
-CodeRabbit provides AI code review on every PR. **Claude Code must wait for CodeRabbit approval before merging.**
+Every pull request must pass the repository's local verification commands and all applicable GitHub checks on the exact PR head. A reviewer who did not implement the change must cold-review the complete `main...HEAD` diff, record the reviewed SHA and verdict, and identify correctness, security, regression, test, compatibility, scope, and destructive-change risks.
+
+Resolve or explicitly rebut every actionable finding and re-run affected verification after fixes. Use at least two independent reviewers for cross-cutting, compatibility, security-sensitive, or otherwise high-risk changes. Any subsequent commit invalidates the prior review verdict and human approval.
+
+Third-party AI review apps and CLIs are not part of this fork's workflow. Do not install or invoke them as review or merge gates.
 
 ### PR Workflow
 
-1. Create PR with `gh pr create`
-2. **Wait for CodeRabbit review** (7-30 min) — check with `gh pr checks <number>`
-3. If CodeRabbit requests changes:
-   - Read the CodeRabbit comments
-   - Address each issue in follow-up commits
-   - Push changes and wait for re-review
-4. Only merge after CodeRabbit approves
+1. Create a draft PR with `gh pr create --draft`.
+2. Run the configured verification commands and record an independent review verdict for the exact PR head.
+3. Monitor GitHub checks with `gh pr checks <number> --watch`.
+4. Address review and CI findings, then re-run affected checks.
+5. Obtain explicit human approval before merging into a shared branch.
 
-### CodeRabbit CLI (Local Review)
-
-Run local review before pushing to catch issues early:
-
-```bash
-# Review uncommitted changes (token-efficient output for AI)
-coderabbit --agent --type uncommitted
-
-# Review committed changes on current branch
-coderabbit --agent --type committed
-```
-
-Always use `--agent` — provides concise, token-efficient output optimized for Claude Code.
-
-### PR Monitoring
-
-```bash
-# After creating PR, wait for CodeRabbit
-gh pr checks <number> --watch
-
-# View CodeRabbit's review comments
-gh pr view <number> --comments
-```
-
-**Important:** Never use `gh pr merge` until CodeRabbit has approved the PR.
+**Important:** Never use `gh pr merge` without explicit human approval.
 
 ## Development Philosophy
 

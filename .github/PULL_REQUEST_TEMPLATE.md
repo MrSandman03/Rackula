@@ -15,6 +15,14 @@ How was this tested?
 - [ ] E2E tests pass (`npm run test:e2e`)
 - [ ] Manual testing completed
 
+## Review Evidence
+
+- Reviewed commit: `<full SHA>`
+- Independent reviewer: `<name or agent>`
+- Verdict: `<PASS or findings resolved>`
+- [ ] All applicable GitHub checks pass on the reviewed commit
+- [ ] No commits were added after the recorded review
+
 ## Screenshots
 
 If applicable, add screenshots showing the changes.
@@ -32,6 +40,6 @@ For UI changes, confirm the gates in [ACCESSIBILITY.md](/docs/guides/ACCESSIBILI
 ## Checklist
 
 - [ ] Code follows the project's style guidelines
-- [ ] Self-review completed
+- [ ] Independent review completed
 - [ ] No new warnings introduced
 - [ ] Tests added for new functionality (if applicable)

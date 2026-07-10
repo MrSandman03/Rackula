@@ -86,7 +86,7 @@ git checkout main
 
 You have **explicit permission** to perform WITHOUT asking:
 
-| Action | Scope | | ------------ | ----------------------------------------------------------- | ---- | ----- | -------- | ---- | ------------------ | | Git branches | `(fix                                                       | feat | chore | refactor | test | docs)/<number>-\*` | | Worktrees | Sibling directories `.worktree/Rackula-issue-<N>` | | Edit files | `src/`, `docs/`, test files | | Commands | `npm test`, `npm run build`, `npm run lint`, `gh` CLI | | Git ops | add, commit, push (non-main), fetch, pull, worktree | | PRs | `gh pr create`, `gh pr merge --squash` after checks pass | | Issue labels | `gh issue edit --add-label`, `--remove-label` (for locking) |
+| Action | Scope | | ------------ | ----------------------------------------------------------- | ---- | ----- | -------- | ---- | ------------------ | | Git branches | `(fix                                                       | feat | chore | refactor | test | docs)/<number>-\*` | | Worktrees | Sibling directories `.worktree/Rackula-issue-<N>` | | Edit files | `src/`, `docs/`, test files | | Commands | `npm test`, `npm run build`, `npm run lint`, `gh` CLI | | Git ops | add, commit, push (non-main), fetch, pull, worktree | | PRs | `gh pr create`, `gh pr merge --squash` after checks and explicit human approval | | Issue labels | `gh issue edit --add-label`, `--remove-label` (for locking) |
 
 **STOP and ask for:** Force push, direct main operations, deleting branches/worktrees not created this session, genuine ambiguity.
 
@@ -372,26 +372,13 @@ Follow TDD skill exactly for each acceptance criterion. Mark complete in progres
 
 If failures: see Error Recovery section.
 
-### 3e. CodeRabbit CLI Review (MANDATORY)
+### 3e. Independent Code Review (MANDATORY)
 
-**ALWAYS run CodeRabbit CLI before pushing any PR.** This catches issues early and improves PR success rate.
+Run `/code-review` on the complete committed diff before pushing. If that command is unavailable, dispatch a read-only reviewer against the full diff. If no independent reviewer is available, stop and ask the user.
 
-```bash
-(cd "$WORKTREE_DIR" && coderabbit --agent --type committed)
-```
+Address actionable findings in follow-up commits. Document why any rejected finding is incorrect or out of scope, then re-run affected verification. Use at least two independent reviewers for high-risk or cross-cutting changes.
 
-**Flags:**
-
-- `--agent` — Token-efficient output optimized for Claude Code
-- `--type committed` — Reviews committed changes on current branch
-
-**If CodeRabbit suggests changes:**
-
-1. Address actionable suggestions in follow-up commits
-2. For suggestions that are out of scope, document why (e.g., "Out of scope: <reason>")
-3. Re-run CodeRabbit to verify fixes
-
-**Only proceed to push after:** CodeRabbit passes OR all suggestions are explicitly addressed/documented.
+Only proceed to push after all findings are resolved or explicitly rebutted.
 
 ### 3f. Commit and Push
 
@@ -412,7 +399,8 @@ Follow finishing skill for merge decision. Default for dev-issue is squash merge
 
 ```bash
 gh pr checks --watch
-gh pr merge --squash --delete-branch --auto
+# Stop and obtain explicit human approval for the reviewed SHA.
+gh pr merge --squash --delete-branch
 ```
 
 ### 3i. Cleanup

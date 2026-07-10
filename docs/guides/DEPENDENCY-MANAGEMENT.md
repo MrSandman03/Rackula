@@ -59,7 +59,7 @@ When major version PRs arrive:
 
 ### "claude-review" check failing on Dependabot PRs
 
-This is expected. The Claude Code Review workflow skips Dependabot PRs because GitHub doesn't expose secrets to them (security feature). CodeRabbit still reviews these PRs.
+This is expected. The Claude Code Review workflow skips Dependabot PRs because GitHub does not expose secrets to them. Rely on the dependency, build, and test checks, then require maintainer review before merge.
 
 ### Multiple related PRs not grouped
 
