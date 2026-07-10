@@ -80,3 +80,19 @@
 - Pushed `fix/legacy-line-limits` to the fork at reviewed head plus ledger-only review commit `d2a75c9b`.
 - Opened draft PR `https://github.com/MrSandman03/Rackula/pull/3` into fork `main`.
 - No merge has been requested or performed; the `main` target lock remains held while hosted checks run and the PR awaits fresh user approval.
+
+## 2026-07-10T21:49:56Z - PR #3 merged
+
+- The user explicitly approved the merge in chat with `merge`.
+- Marked PR #3 ready and squash-merged reviewed head `5b0d5f18b46faa7172b716233f0300d610e8c69d` into fork `main` as `6472e13fc2657ab525850feb7e0a266cc96ef373`.
+- The reviewed head and squash merge resolve to byte-identical trees.
+- Retained the `main` target lock for post-merge verification.
+
+## 2026-07-10T21:53:09Z - Post-merge verification and closure
+
+- `pnpm check:file-lengths` passed with zero violations and a 999-line maximum.
+- `pnpm check` passed with 0 errors and 0 warnings; `pnpm test:run` passed 246 files / 3,592 tests; `pnpm build` passed with only the existing large-chunk advisory.
+- The frontend test runner logged a handled optional-service connection refusal on local port 3000 and still completed all 3,592 tests successfully.
+- The main worktree initially lacked ignored API dependencies; `bun install --frozen-lockfile` restored the exact locked set.
+- API typecheck passed, `bun test` passed 364 tests, and the workers suite passed 10 tests.
+- Session closed successfully and the `main` target lock was released. Feature worktree and branch cleanup follows this closure commit.
