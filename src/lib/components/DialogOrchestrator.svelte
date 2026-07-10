@@ -19,12 +19,7 @@
   import HelpPanel from "$lib/components/HelpPanel.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import DeviceDetails from "$lib/components/DeviceDetails.svelte";
-  import MobileBottomNav from "$lib/components/mobile/MobileBottomNav.svelte";
-  import RackEditSheet from "$lib/components/RackEditSheet.svelte";
-  import MobileViewSheet from "$lib/components/mobile/MobileViewSheet.svelte";
-  import MobileLayoutsSheet from "$lib/components/mobile/MobileLayoutsSheet.svelte";
-  import MobileRacksSheet from "$lib/components/mobile/MobileRacksSheet.svelte";
-  import DevicePalette from "$lib/components/DevicePalette.svelte";
+  import MobileSheetOrchestrator from "$lib/components/mobile/MobileSheetOrchestrator.svelte";
   import LoadDialog from "$lib/components/LoadDialog.svelte";
   import CommandPalette from "$lib/components/CommandPalette.svelte";
 
@@ -53,10 +48,9 @@
   } from "$lib/utils/app-actions";
   import { parseDeviceLibraryImport } from "$lib/utils/import";
   import { registerImportDevicesTrigger } from "$lib/actions/import-devices-trigger";
-  import { hapticTap } from "$lib/utils/haptics";
   import { appDebug, dialogDebug, layoutDebug } from "$lib/utils/debug";
   import type { ImageData } from "$lib/types/images";
-  import type { DisplayMode, Layout, RackWidth } from "$lib/types";
+  import type { Layout, RackWidth } from "$lib/types";
   import type { ImportResult } from "$lib/utils/netbox-import";
 
   import { getSelectionVerbsWithState } from "$lib/actions/verb-bars";
@@ -70,7 +64,7 @@
     canMoveSelectedDeviceSlot,
     isSelectedDeviceContainerChild,
   } from "$lib/actions/selection-actions";
-  import { handleDelete, handleNewRack } from "$lib/utils/dialog-actions";
+  import { handleDelete } from "$lib/utils/dialog-actions";
   import {
     findNextValidPosition,
     canMoveUp,
@@ -108,14 +102,6 @@
 
   // Mobile bottom sheet state
   let bottomSheetOpen = $derived(dialogStore.isSheetOpen("deviceDetails"));
-  let deviceLibrarySheetOpen = $derived(
-    dialogStore.isSheetOpen("deviceLibrary"),
-  );
-  let yamlEditorSheetOpen = $derived(dialogStore.isSheetOpen("yamlEditor"));
-  let rackEditSheetOpen = $derived(dialogStore.isSheetOpen("rackEdit"));
-  let layoutsSheetOpen = $derived(dialogStore.isSheetOpen("layouts"));
-  let racksSheetOpen = $derived(dialogStore.isSheetOpen("racks"));
-  let viewSheetOpen = $derived(dialogStore.isSheetOpen("view"));
 
   // Aliases to dialogStore properties for template access
   let deleteTarget = $derived(dialogStore.deleteTarget);
@@ -311,11 +297,6 @@
 
   function handleYamlEditorClose() {
     dialogStore.close();
-    handleFitAll();
-  }
-
-  function handleYamlEditorSheetClose() {
-    dialogStore.closeSheet();
     handleFitAll();
   }
 
@@ -695,95 +676,6 @@
         break;
     }
   }
-
-  // --- Mobile view/file/device library sheet handlers ---
-
-  function handleViewSheetClick() {
-    dialogStore.openSheet("view");
-  }
-
-  function handleViewSheetClose() {
-    dialogStore.closeSheet();
-    handleFitAll();
-  }
-
-  function handleViewSheetActionClose() {
-    dialogStore.closeSheet();
-  }
-
-  function handleDeviceLibraryTabClick() {
-    dialogStore.openSheet("deviceLibrary");
-  }
-
-  // The Layouts and Racks tabs open titled bottom sheets: Layouts switches the
-  // active layout (#2460) and Racks lists racks and opens their properties
-  // (#2461).
-  function handleLayoutsTabClick() {
-    dialogStore.openSheet("layouts");
-  }
-
-  function handleLayoutsSheetClose() {
-    dialogStore.closeSheet();
-  }
-
-  // The Layouts sheet opens a fresh layout itself (via the workspace store) and
-  // then asks the orchestrator to create a rack directly, mirroring the desktop
-  // New layout flow.
-  function handleLayoutsNewLayout() {
-    handleNewRack();
-  }
-
-  function handleRacksTabClick() {
-    dialogStore.openSheet("racks");
-  }
-
-  function handleRacksSheetClose() {
-    dialogStore.closeSheet();
-  }
-
-  // The Racks sheet creates a rack directly, mirroring the desktop New rack
-  // flow: the rack is placed on the canvas and the view re-centres.
-  function handleRacksNewRack() {
-    handleNewRack();
-  }
-
-  function handleDeviceLibrarySheetClose() {
-    dialogStore.closeSheet();
-    handleFitAll();
-  }
-
-  // --- Mobile rack edit sheet handlers ---
-
-  function handleRackEditSheetClose() {
-    dialogStore.closeSheet();
-    handleFitAll();
-  }
-
-  // --- Mobile device selection (placement mode) ---
-
-  function handleMobileDeviceSelect(
-    event: CustomEvent<{ device: import("$lib/types").DeviceType }>,
-  ) {
-    // Tap-to-place is suppressed when the layout is locked for viewing.
-    if (uiStore.readOnly) return;
-    const { device } = event.detail;
-    hapticTap();
-    placementStore.startPlacement(device);
-    dialogStore.closeSheet();
-  }
-
-  // --- View settings handlers (forwarded from mobile sheets) ---
-
-  function handleSetDisplayMode(mode: DisplayMode) {
-    if (uiStore.displayMode === mode) return;
-    uiStore.setDisplayMode(mode);
-    layoutStore.updateDisplayMode(uiStore.displayMode);
-    layoutStore.updateShowLabelsOnImages(uiStore.showLabelsOnImages);
-  }
-
-  function handleSetAnnotations(enabled: boolean) {
-    uiStore.setAnnotations(enabled);
-  }
 </script>
 
 <!-- Mobile bottom sheet for device details -->
@@ -918,116 +810,10 @@
 
 <CommandPalette />
 
-<!-- Mobile bottom navigation bar -->
-<MobileBottomNav
-  activeTab={layoutsSheetOpen
-    ? "layouts"
-    : racksSheetOpen
-      ? "racks"
-      : deviceLibrarySheetOpen
-        ? "devices"
-        : viewSheetOpen
-          ? "view"
-          : null}
-  hidden={false}
-  onlayoutsclick={handleLayoutsTabClick}
-  onracksclick={handleRacksTabClick}
-  ondevicesclick={handleDeviceLibraryTabClick}
-  onviewclick={handleViewSheetClick}
+<MobileSheetOrchestrator
+  onyamlapply={handleYamlApply}
+  onadddevice={handleAddDevice}
 />
-
-<!-- Layouts tab sheet: scaffold. #2460 populates the layout switcher body. -->
-{#if viewportStore.isMobile && layoutsSheetOpen}
-  <Dialog
-    open={layoutsSheetOpen}
-    title="Layouts"
-    size="M"
-    onclose={handleLayoutsSheetClose}
-  >
-    <MobileLayoutsSheet
-      onnewlayout={handleLayoutsNewLayout}
-      onclose={handleLayoutsSheetClose}
-    />
-  </Dialog>
-{/if}
-
-<!-- Racks tab sheet: lists racks and opens their properties (#2461). -->
-{#if viewportStore.isMobile && racksSheetOpen}
-  <Dialog
-    open={racksSheetOpen}
-    title="Racks"
-    size="M"
-    onclose={handleRacksSheetClose}
-  >
-    <MobileRacksSheet
-      onnewrack={handleRacksNewRack}
-      onclose={handleRacksSheetClose}
-    />
-  </Dialog>
-{/if}
-
-{#if viewportStore.isMobile && yamlEditorSheetOpen}
-  <Dialog
-    open={yamlEditorSheetOpen}
-    title="Layout YAML"
-    size="L"
-    onclose={handleYamlEditorSheetClose}
-  >
-    <LayoutYamlPanel
-      open={yamlEditorSheetOpen}
-      layout={layoutStore.layout}
-      onapply={handleYamlApply}
-    />
-  </Dialog>
-{/if}
-
-{#if viewportStore.isMobile && viewSheetOpen}
-  <Dialog
-    open={viewSheetOpen}
-    title="View"
-    size="M"
-    onclose={handleViewSheetClose}
-  >
-    <MobileViewSheet
-      displayMode={uiStore.displayMode}
-      showAnnotations={uiStore.showAnnotations}
-      ondisplaymodechange={handleSetDisplayMode}
-      onannotationschange={handleSetAnnotations}
-      onfitall={handleFitAll}
-      onresetzoom={() => canvasStore.resetZoom()}
-      onclose={handleViewSheetActionClose}
-    />
-  </Dialog>
-{/if}
-
-{#if viewportStore.isMobile && deviceLibrarySheetOpen}
-  <Dialog
-    open={deviceLibrarySheetOpen}
-    title="Device Library"
-    size="M"
-    onclose={handleDeviceLibrarySheetClose}
-  >
-    <DevicePalette
-      ondeviceselect={handleMobileDeviceSelect}
-      oncreatedevice={handleAddDevice}
-    />
-  </Dialog>
-{/if}
-
-<!-- Mobile rack edit sheet (opened via long press on rack) -->
-{#if viewportStore.isMobile && rackEditSheetOpen && layoutStore.activeRack}
-  <Dialog
-    open={rackEditSheetOpen}
-    title="Edit Rack"
-    size="M"
-    onclose={handleRackEditSheetClose}
-  >
-    <RackEditSheet
-      rack={layoutStore.activeRack}
-      onclose={handleRackEditSheetClose}
-    />
-  </Dialog>
-{/if}
 
 <!-- Hidden file input for device library JSON import -->
 <input

@@ -2,48 +2,40 @@
 /**
  * Bundled Images Generator Script
  *
- * Scans processed device images and generates bundledImages.ts
+ * Scans processed device images and generates a public manifest facade plus
+ * per-vendor modules that stay below the repository line limit.
  *
  * Usage: npm run generate-bundled-images
  */
 
-import { readdir, writeFile } from "fs/promises";
-import { join, relative } from "path";
+import { mkdir, readdir, rm, writeFile } from "fs/promises";
+import { dirname, join, relative } from "path";
 import { fileURLToPath } from "url";
-import { dirname } from "path";
+import { format } from "prettier";
 import {
   parseImagePath,
   generateImportName,
   generateImportStatement,
   generateManifestEntry,
   groupImagesBySlug,
+  type GroupedImages,
   type ParsedImage,
 } from "../src/lib/utils/generate-bundled-images";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const REPO_ROOT = join(__dirname, "..");
+const IMAGES_DIR = join(REPO_ROOT, "src", "lib", "assets", "device-images");
+const DATA_DIR = join(REPO_ROOT, "src", "lib", "data");
+const OUTPUT_FILE = join(DATA_DIR, "bundledImages.ts");
+const GENERATED_DIR = join(DATA_DIR, "bundledImages.generated");
+const MAX_GENERATED_FILE_LINES = 1000;
 
-const IMAGES_DIR = join(
-  __dirname,
-  "..",
-  "src",
-  "lib",
-  "assets",
-  "device-images",
-);
-const OUTPUT_FILE = join(
-  __dirname,
-  "..",
-  "src",
-  "lib",
-  "data",
-  "bundledImages.ts",
-);
-
-// Generic starter-library buckets (server, network, storage, power, kvm) live
-// under this folder and are maintained manually in the template below, so the
-// scanner skips it to keep the top level brands-only.
+// Generic starter-library buckets are maintained in the facade template below.
 const GENERIC_LIBRARY_DIR = "_generic";
+
+type GroupedImage = GroupedImages[string];
+type VendorEntries = Map<string, Array<[string, GroupedImage]>>;
 
 async function getImageFiles(
   dir: string,
@@ -59,76 +51,141 @@ async function getImageFiles(
       const relativePath = basePath ? `${basePath}/${entry.name}` : entry.name;
 
       if (entry.isDirectory()) {
-        // Skip the generic starter-library folder (maintained manually below)
         if (!basePath && entry.name === GENERIC_LIBRARY_DIR) {
           continue;
         }
-        const subFiles = await getImageFiles(fullPath, relativePath);
-        files.push(...subFiles);
+        files.push(...(await getImageFiles(fullPath, relativePath)));
       } else if (entry.isFile() && entry.name.endsWith(".webp")) {
         files.push(relativePath);
       }
     }
   } catch {
-    // Directory doesn't exist
+    // A missing image directory produces an empty generated manifest.
   }
 
   return files;
 }
 
-function generateFileContent(
-  groupedImages: ReturnType<typeof groupImagesBySlug>,
+function getVendorExportName(vendor: string): string {
+  const parts = vendor.split("-");
+  return (
+    parts[0] +
+    parts
+      .slice(1)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join("") +
+    "BundledImages"
+  );
+}
+
+function groupEntriesByVendor(groupedImages: GroupedImages): VendorEntries {
+  const entries = Object.entries(groupedImages).sort(
+    ([slugA, imageA], [slugB, imageB]) =>
+      imageA.vendor.localeCompare(imageB.vendor) || slugA.localeCompare(slugB),
+  );
+  const byVendor: VendorEntries = new Map();
+
+  for (const [slug, image] of entries) {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(image.vendor)) {
+      throw new Error(`Unsupported vendor directory name: ${image.vendor}`);
+    }
+    const vendorEntries = byVendor.get(image.vendor) ?? [];
+    vendorEntries.push([slug, image]);
+    byVendor.set(image.vendor, vendorEntries);
+  }
+
+  const exportNames = new Set<string>();
+  for (const vendor of byVendor.keys()) {
+    const exportName = getVendorExportName(vendor);
+    if (exportNames.has(exportName)) {
+      throw new Error(`Generated vendor export collision: ${exportName}`);
+    }
+    exportNames.add(exportName);
+  }
+
+  return byVendor;
+}
+
+function renderVendorModule(
+  vendor: string,
+  entries: Array<[string, GroupedImage]>,
 ): string {
   const imports: string[] = [];
   const manifestEntries: string[] = [];
 
-  // Sort slugs by vendor then by slug name
-  const sortedSlugs = Object.keys(groupedImages).sort((a, b) => {
-    const vendorA = groupedImages[a].vendor;
-    const vendorB = groupedImages[b].vendor;
-    if (vendorA !== vendorB) return vendorA.localeCompare(vendorB);
-    return a.localeCompare(b);
-  });
-
-  let currentVendor = "";
-
-  for (const slug of sortedSlugs) {
-    const { vendor, front, rear } = groupedImages[slug];
-
-    // Add vendor section comment
-    if (vendor !== currentVendor) {
-      if (currentVendor !== "") {
-        imports.push("");
-        manifestEntries.push("");
-      }
-      imports.push(`// ${vendor.toUpperCase()} images`);
-      manifestEntries.push(`\t// ${vendor.toUpperCase()}`);
-      currentVendor = vendor;
-    }
-
+  for (const [slug, { front, rear }] of entries) {
     const importNames: { front?: string; rear?: string } = {};
 
     if (front) {
-      const importName = generateImportName(slug, "front");
+      importNames.front = generateImportName(slug, "front");
       imports.push(generateImportStatement(vendor, slug, "front"));
-      importNames.front = importName;
     }
-
     if (rear) {
-      const importName = generateImportName(slug, "rear");
+      importNames.rear = generateImportName(slug, "rear");
       imports.push(generateImportStatement(vendor, slug, "rear"));
-      importNames.rear = importName;
     }
 
-    manifestEntries.push(`\t${generateManifestEntry(slug, importNames)},`);
+    manifestEntries.push(`  ${generateManifestEntry(slug, importNames)},`);
   }
 
-  // Remove trailing comma from last entry
-  if (manifestEntries.length > 0) {
-    const lastIndex = manifestEntries.length - 1;
-    manifestEntries[lastIndex] = manifestEntries[lastIndex].replace(/,$/, "");
-  }
+  return `/**
+ * Bundled image manifest for ${vendor}.
+ *
+ * AUTO-GENERATED - DO NOT EDIT MANUALLY
+ * Run: npm run generate-bundled-images
+ */
 
+import type { BundledImageManifest } from "./types";
+${imports.join("\n")}
+
+export const ${getVendorExportName(vendor)} = {
+${manifestEntries.join("\n")}
+} satisfies BundledImageManifest;
+`;
+}
+
+function renderGeneratedIndex(vendors: string[]): string {
+  const imports = vendors.map(
+    (vendor) => `import { ${getVendorExportName(vendor)} } from "./${vendor}";`,
+  );
+  const spreads = vendors.map(
+    (vendor) => `  ...${getVendorExportName(vendor)},`,
+  );
+
+  return `/**
+ * Aggregated brand image manifest.
+ *
+ * AUTO-GENERATED - DO NOT EDIT MANUALLY
+ * Run: npm run generate-bundled-images
+ */
+
+import type { BundledImageManifest } from "./types";
+${imports.join("\n")}
+
+export const BRAND_BUNDLED_IMAGES: BundledImageManifest = {
+${spreads.join("\n")}
+};
+`;
+}
+
+function renderGeneratedTypes(): string {
+  return `/**
+ * Types shared by generated bundled-image modules.
+ *
+ * AUTO-GENERATED - DO NOT EDIT MANUALLY
+ * Run: npm run generate-bundled-images
+ */
+
+export interface BundledImageSet {
+  front?: string;
+  rear?: string;
+}
+
+export type BundledImageManifest = Record<string, BundledImageSet>;
+`;
+}
+
+function renderFacade(): string {
   return `/**
  * Bundled Device Images Manifest
  *
@@ -142,134 +199,143 @@ function generateFileContent(
  * https://github.com/netbox-community/devicetype-library
  */
 
+import { BRAND_BUNDLED_IMAGES } from "./bundledImages.generated";
+import type {
+  BundledImageManifest,
+  BundledImageSet,
+} from "./bundledImages.generated/types";
+
 // ============================================
 // Starter Library (Generic Devices) - Manual
 // ============================================
 
 // Server images
-import server1uFront from '$lib/assets/device-images/_generic/server/1u-server.front.webp';
-import server2uFront from '$lib/assets/device-images/_generic/server/2u-server.front.webp';
-import server4uFront from '$lib/assets/device-images/_generic/server/4u-server.front.webp';
+import server1uFront from "$lib/assets/device-images/_generic/server/1u-server.front.webp";
+import server2uFront from "$lib/assets/device-images/_generic/server/2u-server.front.webp";
+import server4uFront from "$lib/assets/device-images/_generic/server/4u-server.front.webp";
 
 // Network images
-import switch24portFront from '$lib/assets/device-images/_generic/network/24-port-switch.front.webp';
-import switch48portFront from '$lib/assets/device-images/_generic/network/48-port-switch.front.webp';
-import routerFirewallFront from '$lib/assets/device-images/_generic/network/1u-router-firewall.front.webp';
+import switch24portFront from "$lib/assets/device-images/_generic/network/24-port-switch.front.webp";
+import switch48portFront from "$lib/assets/device-images/_generic/network/48-port-switch.front.webp";
+import routerFirewallFront from "$lib/assets/device-images/_generic/network/1u-router-firewall.front.webp";
 
 // Storage images
-import storage1uFront from '$lib/assets/device-images/_generic/storage/1u-storage.front.webp';
-import storage2uFront from '$lib/assets/device-images/_generic/storage/2u-storage.front.webp';
-import storage4uFront from '$lib/assets/device-images/_generic/storage/4u-storage.front.webp';
+import storage1uFront from "$lib/assets/device-images/_generic/storage/1u-storage.front.webp";
+import storage2uFront from "$lib/assets/device-images/_generic/storage/2u-storage.front.webp";
+import storage4uFront from "$lib/assets/device-images/_generic/storage/4u-storage.front.webp";
 
 // Power images
-import ups2uFront from '$lib/assets/device-images/_generic/power/2u-ups.front.webp';
+import ups2uFront from "$lib/assets/device-images/_generic/power/2u-ups.front.webp";
 
 // KVM images
-import consoleDrawerFront from '$lib/assets/device-images/_generic/kvm/1u-console-drawer.front.webp';
+import consoleDrawerFront from "$lib/assets/device-images/_generic/kvm/1u-console-drawer.front.webp";
 
-// ============================================
-// Brand Pack Images - Auto-generated
-// ============================================
+const GENERIC_BUNDLED_IMAGES: BundledImageManifest = {
+  // Servers
+  "1u-server": { front: server1uFront },
+  "2u-server": { front: server2uFront },
+  "4u-server": { front: server4uFront },
 
-${imports.join("\n")}
+  // Network
+  "24-port-switch": { front: switch24portFront },
+  "48-port-switch": { front: switch48portFront },
+  "1u-router-firewall": { front: routerFirewallFront },
 
-/**
- * Bundled image data structure
- */
-interface BundledImageSet {
-	front?: string;
-	rear?: string;
-}
+  // Storage
+  "1u-storage": { front: storage1uFront },
+  "2u-storage": { front: storage2uFront },
+  "4u-storage": { front: storage4uFront },
 
-/**
- * Map of device slugs to their bundled images
- *
- * Keys match the slugs in device type definitions
- * Only devices with real images are included
- */
+  // Power
+  "2u-ups": { front: ups2uFront },
+
+  // KVM
+  "1u-console-drawer": { front: consoleDrawerFront },
+};
+
 const BUNDLED_IMAGES: Record<string, BundledImageSet> = {
-	// ============================================
-	// Starter Library (Generic Devices)
-	// ============================================
-
-	// Servers
-	'1u-server': { front: server1uFront },
-	'2u-server': { front: server2uFront },
-	'4u-server': { front: server4uFront },
-
-	// Network
-	'24-port-switch': { front: switch24portFront },
-	'48-port-switch': { front: switch48portFront },
-	'1u-router-firewall': { front: routerFirewallFront },
-
-	// Storage
-	'1u-storage': { front: storage1uFront },
-	'2u-storage': { front: storage2uFront },
-	'4u-storage': { front: storage4uFront },
-
-	// Power
-	'2u-ups': { front: ups2uFront },
-
-	// KVM
-	'1u-console-drawer': { front: consoleDrawerFront },
-
-	// ============================================
-	// Brand Pack Images - Auto-generated
-	// ============================================
-
-${manifestEntries.join("\n")}
+  ...GENERIC_BUNDLED_IMAGES,
+  ...BRAND_BUNDLED_IMAGES,
 };
 
 /**
- * Get a bundled image URL for a device slug and face
- *
- * @param slug - Device type slug (e.g., '1u-server')
- * @param face - 'front' or 'rear'
- * @returns Image URL string or undefined if no bundled image exists
- *
- * @example
- * getBundledImage('1u-server', 'front') // '/assets/server/1u-server.front.webp'
- * getBundledImage('ubiquiti-unifi-dream-machine-pro', 'front') // Returns UDM-Pro front image
+ * Get a bundled image URL for a device slug and face.
  */
-export function getBundledImage(slug: string, face: 'front' | 'rear'): string | undefined {
-	const imageSet = BUNDLED_IMAGES[slug];
-	if (!imageSet) return undefined;
-	return imageSet[face];
+export function getBundledImage(
+  slug: string,
+  face: "front" | "rear",
+): string | undefined {
+  const imageSet = BUNDLED_IMAGES[slug];
+  if (!imageSet) return undefined;
+  return imageSet[face];
 }
 
 /**
- * Get list of device slugs that have bundled images
- *
- * @returns Array of device slug strings
- *
- * @example
- * getBundledImageSlugs() // ['1u-server', '2u-server', ..., 'ubiquiti-unifi-dream-machine-pro', ...]
+ * Get the device slugs that have bundled images.
  */
 export function getBundledImageSlugs(): string[] {
-	return Object.keys(BUNDLED_IMAGES);
+  return Object.keys(BUNDLED_IMAGES);
 }
 
 /**
- * Check if a device slug has a bundled image
- *
- * @param slug - Device type slug
- * @returns true if device has at least one bundled image
+ * Check whether a device slug has at least one bundled image.
  */
 export function hasBundledImage(slug: string): boolean {
-	return slug in BUNDLED_IMAGES;
+  return slug in BUNDLED_IMAGES;
 }
 `;
 }
 
-async function main(): Promise<void> {
-  console.log("🖼️  Bundled Images Generator");
-  console.log("============================\n");
+async function formatTypeScript(
+  path: string,
+  source: string,
+): Promise<readonly [string, string]> {
+  const formatted = await format(source, { parser: "typescript" });
+  const lineCount = formatted.trimEnd().split(/\r?\n/).length;
+  if (lineCount > MAX_GENERATED_FILE_LINES) {
+    throw new Error(
+      `Generated file ${relative(REPO_ROOT, path)} has ${lineCount} lines; split the vendor before writing it.`,
+    );
+  }
+  return [path, formatted];
+}
 
-  // Get all image files
+async function writeGeneratedManifest(
+  groupedImages: GroupedImages,
+): Promise<void> {
+  const byVendor = groupEntriesByVendor(groupedImages);
+  const vendors = [...byVendor.keys()];
+
+  const sources: Array<readonly [string, string]> = [
+    [OUTPUT_FILE, renderFacade()],
+    [join(GENERATED_DIR, "types.ts"), renderGeneratedTypes()],
+    [join(GENERATED_DIR, "index.ts"), renderGeneratedIndex(vendors)],
+    ...vendors.map(
+      (vendor) =>
+        [
+          join(GENERATED_DIR, `${vendor}.ts`),
+          renderVendorModule(vendor, byVendor.get(vendor) ?? []),
+        ] as const,
+    ),
+  ];
+  const outputs = await Promise.all(
+    sources.map(([path, source]) => formatTypeScript(path, source)),
+  );
+
+  await rm(GENERATED_DIR, { recursive: true, force: true });
+  await mkdir(GENERATED_DIR, { recursive: true });
+  await Promise.all(
+    outputs.map(([path, formatted]) => writeFile(path, formatted, "utf-8")),
+  );
+}
+
+async function main(): Promise<void> {
+  console.log("Bundled Images Generator");
+  console.log("========================\n");
+
   const imageFiles = await getImageFiles(IMAGES_DIR);
   console.log(`Found ${imageFiles.length} device images\n`);
 
-  // Parse images
   const parsedImages: ParsedImage[] = [];
   for (const file of imageFiles) {
     const parsed = parseImagePath(file);
@@ -277,35 +343,25 @@ async function main(): Promise<void> {
       parsedImages.push(parsed);
     }
   }
-
   console.log(`Parsed ${parsedImages.length} valid images\n`);
 
-  // Group by slug
   const grouped = groupImagesBySlug(parsedImages);
-  const slugCount = Object.keys(grouped).length;
-  console.log(`Grouped into ${slugCount} device entries\n`);
-
-  // Count by vendor
-  const vendorCounts: Record<string, number> = {};
-  for (const slug of Object.keys(grouped)) {
-    const vendor = grouped[slug].vendor;
-    vendorCounts[vendor] = (vendorCounts[vendor] || 0) + 1;
-  }
-
+  const byVendor = groupEntriesByVendor(grouped);
+  console.log(`Grouped into ${Object.keys(grouped).length} device entries\n`);
   console.log("By vendor:");
-  for (const [vendor, count] of Object.entries(vendorCounts).sort((a, b) =>
-    a[0].localeCompare(b[0]),
-  )) {
-    console.log(`  ${vendor}: ${count} devices`);
+  for (const [vendor, entries] of byVendor) {
+    console.log(`  ${vendor}: ${entries.length} devices`);
   }
   console.log();
 
-  // Generate file content
-  const content = generateFileContent(grouped);
-
-  // Write file
-  await writeFile(OUTPUT_FILE, content, "utf-8");
-  console.log(`✅ Generated: ${relative(process.cwd(), OUTPUT_FILE)}\n`);
+  await writeGeneratedManifest(grouped);
+  console.log(`Generated: ${relative(process.cwd(), OUTPUT_FILE)}`);
+  console.log(
+    `Generated vendor modules: ${relative(process.cwd(), GENERATED_DIR)}`,
+  );
 }
 
-main().catch(console.error);
+main().catch((error: unknown) => {
+  console.error(error);
+  process.exitCode = 1;
+});

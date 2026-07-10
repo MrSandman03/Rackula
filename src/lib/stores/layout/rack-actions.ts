@@ -20,7 +20,10 @@ import {
   type RackLifecycleCommandStore,
 } from "../commands";
 import type { LayoutStateAccess } from "./types";
-import { getRackGroupCommandAdapter, getRackGroupForRack } from "./rack-groups";
+import {
+  getRackGroupCommandAdapter,
+  getRackGroupForRack,
+} from "./rack-group-state";
 import { setLayoutNamesRaw } from "./mutators";
 import { reorderRackRow } from "$lib/utils/rack-row";
 import { constrainRackProfileUpdates } from "$lib/utils/rack-profile";

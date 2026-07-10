@@ -14,7 +14,6 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import * as yaml from "js-yaml";
-import { SNAPSHOT_NAME_PATTERN } from "./snapshot-name";
 import { countLayoutsInDir, countAssetsInDir } from "./quota";
 import {
   LayoutFileSchema,
@@ -26,21 +25,24 @@ import {
   type LayoutListItem,
 } from "../schemas/layout";
 import { logger } from "../logger";
+import {
+  ensureDataDir,
+  findFolderByUuid,
+  findYamlInFolder,
+  getDataDir,
+  isSafeLegacySlug,
+} from "./filesystem-paths";
+import { PRE_CARRIER_BACKUP_FILENAME, writeSnapshot } from "./snapshots";
 
-function getDataDir(): string {
-  return process.env.DATA_DIR ?? "./data";
-}
-
-const SNAPSHOTS_DIR = "snapshots";
-const MAX_SNAPSHOTS_PER_LAYOUT = 5;
-
-/**
- * Filename of the one-time durable pre-carrier-migration backup, stored at the
- * layout folder root (outside snapshots/, so it is never pruned). Written once
- * via exclusive create on the first migrating save and read back by
- * {@link getPreCarrierBackup}.
- */
-export const PRE_CARRIER_BACKUP_FILENAME = "pre-carrier-backup.yaml";
+export { ensureDataDir, findFolderByUuid } from "./filesystem-paths";
+export {
+  PRE_CARRIER_BACKUP_FILENAME,
+  getPreCarrierBackup,
+  getSnapshot,
+  listSnapshots,
+  saveSnapshot,
+  type SnapshotListItem,
+} from "./snapshots";
 
 /**
  * Per-layout in-process write locks, keyed by layout uuid.
@@ -77,298 +79,11 @@ async function withLayoutLock<T>(
   }
 }
 
-/** Snapshot entry returned by {@link listSnapshots}. */
-export interface SnapshotListItem {
-  filename: string;
-  timestamp: string;
-  size: number;
-}
-
-function isSafeLegacySlug(id: string): boolean {
-  if (!id || id.includes("/") || id.includes("\\") || id.includes(".")) {
-    return false;
-  }
-
-  for (let i = 0; i < id.length; i += 1) {
-    const code = id.charCodeAt(i);
-    if (code < 0x20 || code === 0x7f) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/**
- * Ensure data directory exists
- */
-export async function ensureDataDir(): Promise<void> {
-  await mkdir(getDataDir(), { recursive: true });
-}
-
 /**
  * Count devices across all racks in a layout
  */
 function countDevices(racks: Array<{ devices?: unknown[] }>): number {
   return racks.reduce((sum, rack) => sum + (rack.devices?.length ?? 0), 0);
-}
-
-/**
- * Find a layout folder by UUID
- * Scans DATA_DIR for folders ending with the given UUID
- * Returns the full folder path or null if not found
- */
-export async function findFolderByUuid(
-  uuid: string,
-  customDataDir?: string,
-): Promise<string | null> {
-  // Validate UUID format to prevent path traversal
-  if (!isUuid(uuid)) {
-    return null;
-  }
-
-  const dataDir = customDataDir ?? getDataDir();
-  await mkdir(dataDir, { recursive: true });
-  const entries = await readdir(dataDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      const extractedUuid = extractUuidFromFolderName(entry.name);
-      if (extractedUuid && extractedUuid.toLowerCase() === uuid.toLowerCase()) {
-        return join(dataDir, entry.name);
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Find the .rackula.yaml file inside a layout folder
- * Returns the filename (not full path) or null if not found
- */
-async function findYamlInFolder(folderPath: string): Promise<string | null> {
-  const files = await readdir(folderPath);
-  const yamlFile = files.find((f) => f.endsWith(".rackula.yaml"));
-  return yamlFile ?? null;
-}
-
-/**
- * Format a snapshot timestamp as YYYYMMDD-HHMMSS (UTC, Syncthing naming)
- */
-function formatSnapshotTimestamp(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}` +
-    `-${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}`
-  );
-}
-
-// Control characters (ASCII 0x00-0x1F and 0x7F) are never valid in a snapshot
-// filename and must be rejected before any filesystem access.
-// eslint-disable-next-line no-control-regex -- intentionally matching control chars
-const CONTROL_CHAR_PATTERN = /[\x00-\x1f\x7f]/;
-
-/**
- * Compare snapshot filenames newest-first using the embedded timestamp and
- * numeric collision suffix (no suffix sorts oldest within a timestamp).
- * Plain localeCompare would rank the suffix-less base file above its
- * suffixed siblings, inverting the order for same-timestamp snapshots.
- */
-function compareSnapshotNamesDesc(a: string, b: string): number {
-  const matchA = SNAPSHOT_NAME_PATTERN.exec(a);
-  const matchB = SNAPSHOT_NAME_PATTERN.exec(b);
-  if (!matchA || !matchB) {
-    return b.localeCompare(a);
-  }
-  const [, timestampA = "", suffixA] = matchA;
-  const [, timestampB = "", suffixB] = matchB;
-  return (
-    timestampB.localeCompare(timestampA) ||
-    Number(suffixB ?? 0) - Number(suffixA ?? 0)
-  );
-}
-
-/**
- * Delete oldest snapshots so at most MAX_SNAPSHOTS_PER_LAYOUT remain
- */
-async function pruneSnapshots(snapshotsDir: string): Promise<void> {
-  const entries = await readdir(snapshotsDir, { withFileTypes: true });
-  const files: Array<{ name: string; mtimeMs: number }> = [];
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const stats = await stat(join(snapshotsDir, entry.name));
-    files.push({ name: entry.name, mtimeMs: stats.mtimeMs });
-  }
-
-  files.sort(
-    (a, b) => b.mtimeMs - a.mtimeMs || compareSnapshotNamesDesc(a.name, b.name),
-  );
-  for (const file of files.slice(MAX_SNAPSHOTS_PER_LAYOUT)) {
-    await rm(join(snapshotsDir, file.name), { force: true });
-  }
-}
-
-/**
- * Write a snapshot into {folderPath}/snapshots/{name}~YYYYMMDD-HHMMSS.yaml
- * The base name derives from the stored layout's YAML filename (already
- * sanitized by buildYamlFilename when it was written). Prunes to the
- * MAX_SNAPSHOTS_PER_LAYOUT most recent. Returns the snapshot filename.
- */
-async function writeSnapshot(
-  folderPath: string,
-  yamlContent: string,
-): Promise<string> {
-  const yamlFilename = await findYamlInFolder(folderPath);
-  const baseName = yamlFilename
-    ? yamlFilename.replace(/\.rackula\.yaml$/i, "")
-    : "untitled";
-
-  const snapshotsDir = join(folderPath, SNAPSHOTS_DIR);
-  await mkdir(snapshotsDir, { recursive: true });
-
-  const timestamp = formatSnapshotTimestamp(new Date());
-  let filename = `${baseName}~${timestamp}.yaml`;
-  let suffix = 1;
-  // Exclusive create (wx) makes the existence check and the write one
-  // atomic step so concurrent snapshot writes cannot overwrite each other.
-  for (;;) {
-    try {
-      await writeFile(join(snapshotsDir, filename), yamlContent, {
-        encoding: "utf-8",
-        flag: "wx",
-      });
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-        throw error;
-      }
-      filename = `${baseName}~${timestamp}-${suffix}.yaml`;
-      suffix += 1;
-    }
-  }
-
-  await pruneSnapshots(snapshotsDir);
-  return filename;
-}
-
-/**
- * List snapshots for a layout, newest first
- * Returns null when the layout does not exist
- */
-export async function listSnapshots(
-  uuid: string,
-): Promise<SnapshotListItem[] | null> {
-  const folder = await findFolderByUuid(uuid);
-  if (!folder) {
-    return null;
-  }
-
-  const snapshotsDir = join(folder, SNAPSHOTS_DIR);
-  let entries;
-  try {
-    entries = await readdir(snapshotsDir, { withFileTypes: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
-    }
-    throw error;
-  }
-
-  const snapshots: SnapshotListItem[] = [];
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const stats = await stat(join(snapshotsDir, entry.name));
-    snapshots.push({
-      filename: entry.name,
-      timestamp: stats.mtime.toISOString(),
-      size: stats.size,
-    });
-  }
-
-  return snapshots.sort(
-    (a, b) =>
-      b.timestamp.localeCompare(a.timestamp) ||
-      compareSnapshotNamesDesc(a.filename, b.filename),
-  );
-}
-
-/** A snapshot filename is a bare {base}~YYYYMMDD-HHMMSS[-N].yaml with no path. */
-function isSafeSnapshotFilename(filename: string): boolean {
-  if (filename.includes("/") || filename.includes("\\")) {
-    return false;
-  }
-  // Reject control characters (ASCII 0x00-0x1F and 0x7F) so a malformed name
-  // returns null rather than surfacing a thrown readFile error.
-  if (CONTROL_CHAR_PATTERN.test(filename)) {
-    return false;
-  }
-  return SNAPSHOT_NAME_PATTERN.test(filename);
-}
-
-/**
- * Read a single snapshot's YAML content for a layout.
- * Returns null when the layout, the snapshots folder, or the file is missing,
- * or when the filename is not a safe snapshot name.
- */
-export async function getSnapshot(
-  uuid: string,
-  filename: string,
-): Promise<string | null> {
-  if (!isSafeSnapshotFilename(filename)) {
-    return null;
-  }
-
-  const folder = await findFolderByUuid(uuid);
-  if (!folder) {
-    return null;
-  }
-
-  try {
-    return await readFile(join(folder, SNAPSHOTS_DIR, filename), "utf-8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return null;
-    }
-    throw error;
-  }
-}
-
-/**
- * Read the durable pre-carrier-migration backup for a layout.
- * Returns null when the layout folder or the backup file is missing.
- */
-export async function getPreCarrierBackup(
-  uuid: string,
-): Promise<string | null> {
-  const folder = await findFolderByUuid(uuid);
-  if (!folder) {
-    return null;
-  }
-
-  try {
-    return await readFile(join(folder, PRE_CARRIER_BACKUP_FILENAME), "utf-8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return null;
-    }
-    throw error;
-  }
-}
-
-/**
- * Store an uploaded losing copy as a snapshot for a layout
- * Returns null when the layout does not exist
- */
-export async function saveSnapshot(
-  uuid: string,
-  yamlContent: string,
-): Promise<{ filename: string } | null> {
-  const folder = await findFolderByUuid(uuid);
-  if (!folder) {
-    return null;
-  }
-
-  const filename = await writeSnapshot(folder, yamlContent);
-  return { filename };
 }
 
 /**

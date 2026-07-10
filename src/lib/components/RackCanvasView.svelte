@@ -20,10 +20,15 @@
   import BayedRackView from "./BayedRackView.svelte";
   import { organizeRackRow, baySourceForItem } from "$lib/utils/rack-row";
   import { bayRack } from "$lib/actions/selection-actions";
-  import { getMinResizeHeight, snapResizeHeight } from "$lib/utils/rack-resize";
   import { U_HEIGHT_PX, getRackWidth } from "$lib/constants/layout";
-  import { MAX_RACK_HEIGHT } from "$lib/types/constants";
   import { isRackMateT1Plus } from "$lib/utils/rack-profile";
+  import {
+    createRackResizeController,
+    GRIP_HIT_MAX_PX,
+    GRIP_SQUARE_PX,
+    type ResizeGrip,
+    type ResizeTarget,
+  } from "$lib/utils/rack-resize-controller.svelte";
 
   interface Props {
     partyMode?: boolean;
@@ -118,238 +123,32 @@
       : null,
   );
 
-  // --- Canvas drag-to-resize for standalone racks (#2737) ---
-  // Grips on a selected standalone rack drag its height in whole-U steps. The
-  // frame previews live via a raw (non-recorded) height set, then commits once
-  // on release so undo/redo sees a single step. Only the height changes, never
-  // device positions, so placed gear keeps its U-number: empty U lands at the
-  // high-numbered open end on grow and is removed from it on shrink.
-  type ResizeGrip = "top" | "bottom";
-
-  // A resize affordance targets either a standalone rack or a whole bay. A bay
-  // resizes every member together to preserve the equal-height invariant (#2740).
-  type ResizeTarget =
-    | { kind: "rack"; rackId: string }
-    | { kind: "bay"; groupId: string; rackIds: string[] };
-
-  interface ResizeDrag {
-    target: ResizeTarget;
-    /** The racks the drag mutates (one rack, or every member of a bay). */
-    rackIds: string[];
-    grip: ResizeGrip;
-    startHeight: number;
-    startClientY: number;
-    minHeight: number;
-    previewHeight: number;
-    pointerId: number;
-  }
-
-  let resizeDrag = $state<ResizeDrag | null>(null);
-
-  // Resize-handle geometry, all screen-space so the affordance reads the same at
-  // any zoom (#2824). The visible square is a fixed 11px; the invisible hit area
-  // is 44px but shrinks on short racks at low zoom so the top and bottom zones
-  // never overlap, with a small gap between them.
-  const GRIP_SQUARE_PX = 11;
-  const GRIP_HIT_MAX_PX = 44;
-  const GRIP_HIT_GAP_PX = 4;
-
-  // Screen-space height of one grip's hit area. Floored at the visible square so
-  // it never collapses to zero: resize stays reachable at any zoom, even when
-  // half the rack's on-screen height (minus the gap) drops below the square.
-  function resizeHitHeightPx(heightU: number): number {
-    const rackScreenHeight = heightU * U_HEIGHT_PX * canvasStore.zoom;
-    return Math.max(
-      GRIP_SQUARE_PX,
-      Math.min(GRIP_HIT_MAX_PX, rackScreenHeight / 2 - GRIP_HIT_GAP_PX),
-    );
-  }
-
-  // The racks a target mutates: a standalone rack is itself; a bay is all its
-  // members so they stay equal height.
-  function resizeTargetRackIds(target: ResizeTarget): string[] {
-    return target.kind === "rack" ? [target.rackId] : target.rackIds;
-  }
-
-  function resizeTargetHasFixedProfile(target: ResizeTarget): boolean {
-    return resizeTargetRackIds(target).some((id) => {
-      const rack = layoutStore.getRackById(id);
-      return isRackMateT1Plus(rack);
-    });
-  }
-
-  // The lowest height the target can shrink to without clipping any device:
-  // the highest floor across every rack the target mutates.
-  function resizeTargetMinHeight(rackIds: string[]): number {
-    let floor = 0;
-    for (const id of rackIds) {
-      const rack = layoutStore.getRackById(id);
-      if (!rack) continue;
-      const min = getMinResizeHeight(rack, deviceLibrary);
-      if (min > floor) floor = min;
-    }
-    return floor;
-  }
-
-  // Commit a settled height to the target as a single recorded step: a standalone
-  // rack updates directly; a bay updates every member together.
-  function commitResizeHeight(target: ResizeTarget, height: number) {
-    if (resizeTargetHasFixedProfile(target)) return;
-    if (target.kind === "rack") {
-      layoutStore.updateRack(target.rackId, { height });
-    } else {
-      layoutStore.resizeBayedGroupHeight(target.groupId, height);
-    }
-    // Direct-manipulation commit (drag release or keyboard step): nudge the
-    // camera by the minimum needed to keep the resized extent on screen.
-    // Growing past an edge pans (or zooms out) just enough; an in-viewport
-    // resize or a shrink stays put. Undo/redo mutate the store directly and
-    // never reach here, so the camera holds still for them.
-    canvasStore.ensureRacksVisible(
-      resizeTargetRackIds(target),
-      layoutStore.racks,
-      layoutStore.rack_groups,
-    );
-  }
-
-  // Dragging away from the rack body grows it: up for the top grip, down for
-  // the bottom grip. Both keep device positions fixed (open-end growth).
-  function resizeGrowPx(
-    grip: ResizeGrip,
-    startClientY: number,
-    clientY: number,
-  ): number {
-    return grip === "top" ? startClientY - clientY : clientY - startClientY;
-  }
-
-  // Keep canvas pan/zoom from hijacking a grip press: panzoom listens for
-  // mousedown/touchstart on an ancestor in the bubble phase, so stopping
-  // propagation here is enough.
-  function blockPan(event: Event) {
-    event.stopPropagation();
-  }
-
-  function handleResizeStart(
-    target: ResizeTarget,
-    grip: ResizeGrip,
-    event: PointerEvent,
-  ) {
-    if (resizeTargetHasFixedProfile(target)) return;
-    const rackIds = resizeTargetRackIds(target);
-    const firstRackId = rackIds[0];
-    if (!firstRackId) return;
-    const firstRack = layoutStore.getRackById(firstRackId);
-    if (!firstRack) return;
-    event.preventDefault();
-    event.stopPropagation();
-    // setPointerCapture is absent in some runtimes (happy-dom tests); guard it
-    // the same way RackDevice does so a grip press never throws.
-    const el = event.currentTarget as HTMLElement;
-    if (el?.setPointerCapture) el.setPointerCapture(event.pointerId);
-    // Make a standalone target active so its selection chrome matches; the raw
-    // preview below is id-targeted, so correctness does not depend on this.
-    if (target.kind === "rack" && activeRackId !== target.rackId) {
-      layoutStore.setActiveRack(target.rackId);
-    }
-    resizeDrag = {
-      target,
-      rackIds,
-      grip,
-      startHeight: firstRack.height,
-      startClientY: event.clientY,
-      minHeight: resizeTargetMinHeight(rackIds),
-      previewHeight: firstRack.height,
-      pointerId: event.pointerId,
-    };
-  }
-
-  function handleResizeMove(event: PointerEvent) {
-    const drag = resizeDrag;
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    const pxPerU = U_HEIGHT_PX * canvasStore.zoom;
-    const previewHeight = snapResizeHeight({
-      startHeight: drag.startHeight,
-      growPx: resizeGrowPx(drag.grip, drag.startClientY, event.clientY),
-      pxPerU,
-      minHeight: drag.minHeight,
-      maxHeight: MAX_RACK_HEIGHT,
-      // Measure hysteresis from the step already on screen so jitter at a U
-      // boundary does not flip the preview back and forth (#2821).
-      currentHeight: drag.previewHeight,
-    });
-    if (previewHeight === drag.previewHeight) return;
-    drag.previewHeight = previewHeight;
-    // Live frame preview, id-targeted so a mid-drag active-rack change cannot
-    // resize the wrong rack. Raw set records no history and leaves the doc clean.
-    for (const id of drag.rackIds) {
-      layoutStore.updateRackRaw({ height: previewHeight }, id);
-    }
-  }
-
-  function handleResizeEnd(event: PointerEvent) {
-    const drag = resizeDrag;
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    // Recompute from the release position so a fast release that outran the
-    // last pointermove still commits the height under the pointer.
-    const pxPerU = U_HEIGHT_PX * canvasStore.zoom;
-    const finalHeight = snapResizeHeight({
-      startHeight: drag.startHeight,
-      growPx: resizeGrowPx(drag.grip, drag.startClientY, event.clientY),
-      pxPerU,
-      minHeight: drag.minHeight,
-      maxHeight: MAX_RACK_HEIGHT,
-      // Apply the same hysteresis as the live preview so the release cannot
-      // land one U off the height shown under the pointer (#2821).
-      currentHeight: drag.previewHeight,
-    });
-    const { target, rackIds, startHeight } = drag;
-    resizeDrag = null;
-    // Rewind the preview (id-targeted), then commit once so undo sees
-    // start -> final as a single step.
-    for (const id of rackIds) {
-      layoutStore.updateRackRaw({ height: startHeight }, id);
-    }
-    if (finalHeight !== startHeight) {
-      commitResizeHeight(target, finalHeight);
-    }
-  }
-
-  function handleResizeCancel(event: PointerEvent) {
-    const drag = resizeDrag;
-    if (!drag || event.pointerId !== drag.pointerId) return;
-    const { rackIds, startHeight } = drag;
-    resizeDrag = null;
-    for (const id of rackIds) {
-      layoutStore.updateRackRaw({ height: startHeight }, id);
-    }
-  }
-
-  // Keyboard resize for a focused grip: Arrow Up grows, Arrow Down shrinks by
-  // one U. Each press is its own undoable step. A bay grip moves every member.
-  function handleResizeKey(target: ResizeTarget, event: KeyboardEvent) {
-    let delta: number;
-    if (event.key === "ArrowUp") delta = 1;
-    else if (event.key === "ArrowDown") delta = -1;
-    else return;
-    if (resizeTargetHasFixedProfile(target)) return;
-    const rackIds = resizeTargetRackIds(target);
-    const firstRackId = rackIds[0];
-    if (!firstRackId) return;
-    const firstRack = layoutStore.getRackById(firstRackId);
-    if (!firstRack) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const minHeight = resizeTargetMinHeight(rackIds);
-    const next = Math.max(
-      minHeight,
-      Math.min(MAX_RACK_HEIGHT, firstRack.height + delta),
-    );
-    if (next === firstRack.height) return;
-    if (target.kind === "rack" && activeRackId !== target.rackId) {
-      layoutStore.setActiveRack(target.rackId);
-    }
-    commitResizeHeight(target, next);
-  }
+  const resizeController = createRackResizeController({
+    getActiveRackId: () => activeRackId,
+    getRack: (rackId) => layoutStore.getRackById(rackId),
+    getDeviceLibrary: () => deviceLibrary,
+    getZoom: () => canvasStore.zoom,
+    setActiveRack: (rackId) => layoutStore.setActiveRack(rackId),
+    updateRackRaw: (rackId, height) =>
+      layoutStore.updateRackRaw({ height }, rackId),
+    updateRack: (rackId, height) => layoutStore.updateRack(rackId, { height }),
+    resizeBayedGroupHeight: (groupId, height) =>
+      layoutStore.resizeBayedGroupHeight(groupId, height),
+    ensureRacksVisible: (rackIds) =>
+      canvasStore.ensureRacksVisible(
+        rackIds,
+        layoutStore.racks,
+        layoutStore.rack_groups,
+      ),
+  });
+  const resizeDrag = $derived(resizeController.drag);
+  const resizeHitHeightPx = resizeController.hitHeightPx;
+  const blockPan = resizeController.blockPan;
+  const handleResizeStart = resizeController.start;
+  const handleResizeMove = resizeController.move;
+  const handleResizeEnd = resizeController.end;
+  const handleResizeCancel = resizeController.cancel;
+  const handleResizeKey = resizeController.handleKey;
 
   // --- Baying: create / extend a bay (#2740) ---
   // Both the verb bar's bay action and the resistant edge drag run one shared

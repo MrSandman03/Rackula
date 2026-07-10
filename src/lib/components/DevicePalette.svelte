@@ -4,7 +4,6 @@
   Uses exclusive accordion (only one section open at a time)
 -->
 <script lang="ts">
-  import { Accordion } from "bits-ui";
   import { SvelteSet } from "svelte/reactivity";
   import { getLayoutStore } from "$lib/stores/layout.svelte";
   import { getToastStore } from "$lib/stores/toast.svelte";
@@ -34,18 +33,15 @@
   } from "$lib/utils/deviceFavourites";
   import { getUIStore } from "$lib/stores/ui.svelte";
   import { debounce } from "$lib/utils/debounce";
-  import { truncateWithEllipsis } from "$lib/utils/searchHighlight";
   import { getBrandPacks, getBrandSlugs } from "$lib/data/brandPacks";
   import { getStarterLibrary, getStarterSlugs } from "$lib/data/starterLibrary";
   import { getMountRecommendation } from "$lib/utils/mount-recommendations";
   import { getRackFitSummary } from "$lib/utils/rack-fit";
   import DevicePaletteItem from "./DevicePaletteItem.svelte";
-  import VirtualList from "./VirtualList.svelte";
-  import BrandIcon from "./BrandIcon.svelte";
   import SegmentedControl from "./SegmentedControl.svelte";
   import DeviceFilterPopover from "./DeviceFilterPopover.svelte";
-  import IconPin from "./icons/IconPin.svelte";
-  import { ICON_SIZE } from "$lib/constants/sizing";
+  import DevicePaletteList from "./DevicePaletteList.svelte";
+  import type { DevicePaletteSection } from "./device-palette.types";
   import type { DeviceType } from "$lib/types";
 
   interface Props {
@@ -161,24 +157,6 @@
   const updateSearchQuery = debounce((value: string) => {
     searchQuery = value;
   }, 150);
-
-  /**
-   * Device section definition for collapsible groups
-   */
-  interface DeviceSection {
-    id: string;
-    title: string;
-    devices: DeviceType[];
-    defaultExpanded: boolean;
-    /** simple-icons slug for brand logo */
-    icon?: string;
-    /** Number of devices matching search query */
-    matchCount?: number;
-    /** First matching device for preview */
-    firstMatch?: DeviceType;
-    /** True if section has no matches during search */
-    isEmpty?: boolean;
-  }
 
   // Get brand packs
   const brandPacks = getBrandPacks();
@@ -449,7 +427,7 @@
   });
 
   // Sections for brand mode - filter out empty sections (no compatible devices)
-  const brandModeSections = $derived<DeviceSection[]>(
+  const brandModeSections = $derived<DevicePaletteSection[]>(
     [
       {
         id: "generic",
@@ -480,7 +458,7 @@
   );
 
   // Sections for category mode
-  const categoryModeSections = $derived.by<DeviceSection[]>(() => {
+  const categoryModeSections = $derived.by<DevicePaletteSection[]>(() => {
     const grouped = groupDevicesByCategory(filteredAllDevices);
 
     return categoryOrder
@@ -504,7 +482,7 @@
   });
 
   // Sections for flat mode (single "All Devices" section)
-  const flatModeSections = $derived.by<DeviceSection[]>(() => [
+  const flatModeSections = $derived.by<DevicePaletteSection[]>(() => [
     {
       id: "all",
       title: "All Devices",
@@ -517,7 +495,7 @@
   ]);
 
   // Select sections based on grouping mode
-  const sections = $derived.by<DeviceSection[]>(() => {
+  const sections = $derived.by<DevicePaletteSection[]>(() => {
     switch (groupingMode) {
       case "category":
         return categoryModeSections;
@@ -562,22 +540,6 @@
   function handleDeviceSelect(event: CustomEvent<{ device: DeviceType }>) {
     if (!isCompatible(event.detail.device)) return;
     ondeviceselect?.(event);
-  }
-
-  function handleAccordionTriggerClick() {
-    // When user manually clicks accordion after search, switch back to single mode
-    if (accordionMode === "multiple" && !isSearchActive) {
-      accordionMode = "single";
-      accordionSingleValue = accordionMultipleValue[0] ?? preSearchSingleValue;
-      // The clicked section will be set by the accordion component
-    }
-  }
-
-  function isSectionExpanded(sectionId: string): boolean {
-    if (accordionMode === "multiple") {
-      return accordionMultipleValue.includes(sectionId);
-    }
-    return accordionSingleValue === sectionId;
   }
 
   function isCompatible(device: DeviceType): boolean {
@@ -635,166 +597,41 @@
     {/if}
   </div>
 
-  <!-- Device List -->
-  <div class="device-list" class:fill-flat={flatFill}>
-    {#snippet deviceRow(device: DeviceType)}
-      <DevicePaletteItem
-        {device}
-        searchQuery={isSearchActive ? searchQuery : ""}
-        isCompatible={isCompatible(device)}
-        incompatibilityReason={incompatibilityReason(device)}
-        placementRequirement={placementRequirement(device)}
-        fitSummary={fitSummary(device)}
-        canDelete={canDeleteDevice(device)}
-        isFavourite={isFavourite(device.slug)}
-        onselect={handleDeviceSelect}
-        ondelete={handleDeviceDelete}
-        ontogglefavourite={handleToggleFavourite}
-      />
-    {/snippet}
+  {#snippet deviceRow(device: DeviceType)}
+    <DevicePaletteItem
+      {device}
+      searchQuery={isSearchActive ? searchQuery : ""}
+      isCompatible={isCompatible(device)}
+      incompatibilityReason={incompatibilityReason(device)}
+      placementRequirement={placementRequirement(device)}
+      fitSummary={fitSummary(device)}
+      canDelete={canDeleteDevice(device)}
+      isFavourite={isFavourite(device.slug)}
+      onselect={handleDeviceSelect}
+      ondelete={handleDeviceDelete}
+      ontogglefavourite={handleToggleFavourite}
+    />
+  {/snippet}
 
-    <!-- Flat device list: windowed when long, plain DOM when short, so the
-         accordion height animation survives for small sections. -->
-    {#snippet deviceList(devices: DeviceType[], label: string, fill = false)}
-      {#if devices.length > VIRTUALIZE_THRESHOLD}
-        <div
-          class="virtual-section"
-          class:fill
-          style:height={fill
-            ? null
-            : `${Math.min(devices.length * ROW_HEIGHT, VIRTUAL_VIEWPORT_MAX)}px`}
-        >
-          <VirtualList
-            items={devices}
-            itemHeight={ROW_HEIGHT}
-            key={(device) => device.slug}
-            ariaLabel={label}
-          >
-            {#snippet row(device)}
-              {@render deviceRow(device)}
-            {/snippet}
-          </VirtualList>
-        </div>
-      {:else}
-        <div class="section-devices" role="list" aria-label={label}>
-          {#each devices as device (device.slug)}
-            {@render deviceRow(device)}
-          {/each}
-        </div>
-      {/if}
-    {/snippet}
-
-    {#if !hasDevices}
-      <div class="empty-state">
-        <p class="empty-message">No devices in library</p>
-        <p class="empty-hint">Add a device to get started</p>
-      </div>
-    {:else if !hasResults}
-      <div class="empty-state">
-        <p class="empty-message">
-          {#if isSearchActive && hasActiveAttributeFilters}
-            No devices match your search and filters
-          {:else if hasActiveAttributeFilters}
-            No devices match your filters
-          {:else}
-            No devices match your search
-          {/if}
-        </p>
-      </div>
-    {:else}
-      {#if pinnedDevices.length > 0}
-        <section class="pinned-section" aria-label="Pinned devices">
-          <h3 class="pinned-header">
-            <IconPin size={ICON_SIZE.sm} filled />
-            <span>Pinned</span>
-            <span class="section-count">({pinnedDevices.length})</span>
-          </h3>
-          {@render deviceList(pinnedDevices, "Pinned devices")}
-        </section>
-      {/if}
-
-      {#snippet accordionSections()}
-        {#each sections as section (section.id)}
-          <Accordion.Item value={section.id} class="accordion-item">
-            <Accordion.Header>
-              <Accordion.Trigger
-                class="accordion-trigger{section.isEmpty
-                  ? ' has-no-matches'
-                  : ''}"
-                onclick={handleAccordionTriggerClick}
-              >
-                <span class="section-header">
-                  {#if section.icon || section.id === "apc"}
-                    <BrandIcon slug={section.icon} size={ICON_SIZE.sm} />
-                  {/if}
-                  <span class="section-title">{section.title}</span>
-                </span>
-
-                {#if isSearchActive && section.matchCount !== undefined}
-                  <span class="match-info">
-                    <span class="match-count">({section.matchCount})</span>
-                    {#if section.firstMatch && !isSectionExpanded(section.id)}
-                      <span class="match-preview">
-                        -
-                        {truncateWithEllipsis(
-                          section.firstMatch.model ?? section.firstMatch.slug,
-                          30,
-                        )}
-                      </span>
-                    {/if}
-                  </span>
-                {:else}
-                  <span class="section-count">({section.devices.length})</span>
-                {/if}
-              </Accordion.Trigger>
-            </Accordion.Header>
-            <Accordion.Content class="accordion-content">
-              <div class="accordion-content-inner">
-                {#if section.id === "generic" && groupingMode === "brand"}
-                  <!-- Generic section uses category grouping (brand mode only) -->
-                  {#each groupedGenericDevices as [category, devices] (category)}
-                    {#if !isSearchActive || devices.length > 0}
-                      <div class="category-group">
-                        <h3 class="category-header">
-                          {getCategoryDisplayName(category)}
-                        </h3>
-                        {@render deviceList(
-                          devices,
-                          getCategoryDisplayName(category),
-                        )}
-                      </div>
-                    {/if}
-                  {/each}
-                {:else}
-                  <!-- All other sections show devices in a flat list. In flat
-                       A-Z mode the lone section fills the panel (see flatFill). -->
-                  {@render deviceList(section.devices, section.title, flatFill)}
-                {/if}
-              </div>
-            </Accordion.Content>
-          </Accordion.Item>
-        {/each}
-      {/snippet}
-
-      {#if accordionMode === "multiple"}
-        <Accordion.Root
-          type="multiple"
-          bind:value={accordionMultipleValue}
-          class="device-accordion"
-        >
-          {@render accordionSections()}
-        </Accordion.Root>
-      {:else}
-        <Accordion.Root
-          type="single"
-          bind:value={accordionSingleValue}
-          class="device-accordion"
-        >
-          {@render accordionSections()}
-        </Accordion.Root>
-      {/if}
-    {/if}
-  </div>
+  <DevicePaletteList
+    {sections}
+    {groupedGenericDevices}
+    {pinnedDevices}
+    {groupingMode}
+    {flatFill}
+    {isSearchActive}
+    {hasActiveAttributeFilters}
+    {hasDevices}
+    {hasResults}
+    {preSearchSingleValue}
+    rowHeight={ROW_HEIGHT}
+    virtualizeThreshold={VIRTUALIZE_THRESHOLD}
+    virtualViewportMax={VIRTUAL_VIEWPORT_MAX}
+    {deviceRow}
+    bind:accordionMode
+    bind:accordionSingleValue
+    bind:accordionMultipleValue
+  />
 
   {#if oncreatedevice}
     <div class="palette-footer">
@@ -915,247 +752,5 @@
   .search-input:focus {
     border-color: var(--colour-selection);
     box-shadow: var(--glow-pink-sm);
-  }
-
-  .device-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: var(--space-2) 0;
-  }
-
-  /* Accordion Trigger Styling */
-  :global(.accordion-trigger) {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: calc(100% - var(--space-4));
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--font-size-sm);
-    font-weight: 600;
-    text-align: left;
-    background: var(--colour-surface-secondary);
-    border: none;
-    border-radius: var(--radius-sm);
-    margin: var(--space-1) var(--space-2);
-    cursor: pointer;
-    color: var(--colour-text);
-    transition:
-      background-color 150ms ease,
-      color 150ms ease;
-  }
-
-  :global(.accordion-trigger:hover) {
-    background: var(--colour-surface-hover);
-  }
-
-  :global(.accordion-trigger:focus-visible) {
-    outline: 2px solid var(--colour-selection);
-    outline-offset: -2px;
-  }
-
-  :global(.accordion-trigger[data-state="open"]) {
-    background: var(--colour-surface-active);
-  }
-
-  :global(.accordion-trigger.has-no-matches) {
-    opacity: 0.5;
-    color: var(--colour-text-muted);
-  }
-
-  .section-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    flex: 1;
-  }
-
-  .section-title {
-    flex: 1;
-  }
-
-  .section-count {
-    margin-left: var(--space-2);
-    font-weight: 400;
-    color: var(--colour-text-muted);
-  }
-
-  .match-info {
-    display: flex;
-    align-items: center;
-    gap: var(--space-1);
-    margin-left: var(--space-2);
-  }
-
-  .match-count {
-    font-weight: 400;
-    color: var(--colour-text-muted);
-  }
-
-  .match-preview {
-    font-style: italic;
-    font-weight: 400;
-    color: var(--colour-text-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 200px;
-  }
-
-  /* Accordion Content Styling with CSS Grid animation */
-  :global(.accordion-content) {
-    display: grid;
-    grid-template-rows: 0fr;
-    transition: grid-template-rows 200ms ease-out;
-    overflow: hidden;
-  }
-
-  :global(.accordion-content[data-state="open"]) {
-    grid-template-rows: 1fr;
-  }
-
-  :global(.accordion-content[data-state="closed"]) {
-    grid-template-rows: 0fr;
-  }
-
-  :global(.accordion-content-inner) {
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  /* Reduced motion support */
-  @media (prefers-reduced-motion: reduce) {
-    :global(.accordion-content) {
-      transition: none;
-    }
-  }
-
-  .category-group {
-    margin-bottom: var(--space-2);
-  }
-
-  .category-header {
-    margin: 0;
-    padding: var(--space-2) var(--space-3) var(--space-1);
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--colour-text-muted);
-  }
-
-  .section-devices {
-    display: flex;
-    flex-direction: column;
-  }
-
-  /* Windowed section: fixed height so VirtualList can scroll within it. */
-  .virtual-section {
-    overflow: hidden;
-  }
-
-  /* Flat A-Z fill (#2698): the lone windowed section grows to fill the panel
-     and scrolls within itself, instead of being pinned to VIRTUAL_VIEWPORT_MAX.
-     A flex chain runs device-list -> accordion -> item -> open content -> inner
-     -> section so the section resolves a definite fill height, and VirtualList's
-     max-height: 100% then drives the internal scroll. Scoped to .fill-flat so
-     grouped views (Brand/Category) keep the fixed per-section cap. */
-  .device-list.fill-flat {
-    display: flex;
-    flex-direction: column;
-  }
-
-  /* Pinned favourites sit at the top and the accordion fills the rest. Cap the
-     pinned strip so a long favourites list can never starve the A-Z library to
-     zero height (it scrolls within itself past the cap); the accordion always
-     keeps the majority of the panel. */
-  .device-list.fill-flat > .pinned-section {
-    flex: 0 1 auto;
-    min-height: 0;
-    max-height: 45%;
-    overflow-y: auto;
-  }
-
-  .device-list.fill-flat :global(.device-accordion) {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  /* Fill only the open section, so a manually-collapsed A-Z section shrinks back
-     to its header height instead of an open item holding the full panel. */
-  .device-list.fill-flat
-    :global(.device-accordion .accordion-item[data-state="open"]) {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  /* Only the open section fills; gating on [data-state="open"] lets a closed
-     one still collapse via the grid 0fr rule (see transition note below). */
-  .device-list.fill-flat
-    :global(.device-accordion .accordion-content[data-state="open"]) {
-    flex: 1;
-    min-height: 0;
-  }
-
-  .device-list.fill-flat :global(.accordion-content-inner) {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-  }
-
-  .virtual-section.fill {
-    flex: 1;
-    min-height: 0;
-  }
-
-  /* In fill mode the open section is flex-sized, so the grid-row slide no longer
-     tracks the box (flex refills the freed space and the box snaps at the end).
-     Collapse instantly instead; the sole A-Z section is open by default, so the
-     only transition this drops is the rare manual collapse/expand. */
-  .device-list.fill-flat :global(.accordion-content) {
-    transition: none;
-  }
-
-  .pinned-section {
-    margin: var(--space-1) var(--space-2) var(--space-3);
-    padding-bottom: var(--space-2);
-    border-bottom: 1px solid var(--colour-border);
-  }
-
-  .pinned-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin: 0;
-    padding: var(--space-2) var(--space-3) var(--space-1);
-    font-size: var(--font-size-xs);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--colour-text-muted);
-  }
-
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-6);
-    text-align: center;
-  }
-
-  .empty-message {
-    margin: 0;
-    font-size: var(--font-size-base);
-    color: var(--colour-text);
-  }
-
-  .empty-hint {
-    margin: var(--space-1) 0 0;
-    font-size: var(--font-size-sm);
-    color: var(--colour-text-muted);
   }
 </style>
