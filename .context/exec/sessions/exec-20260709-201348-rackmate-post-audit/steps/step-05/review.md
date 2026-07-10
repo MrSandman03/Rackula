@@ -12,3 +12,5 @@ Verdict: PASS
 - Final line-limit reviewer: PASS. Confirmed zero new 1,000-line hard-limit crossings across 174 changed paths.
 
 No unresolved critical or major findings remain. Files already above 1,000 lines at base are inherited debt and were not expanded into this repair.
+
+All GitHub Actions checks passed on PR head `27fdb43e`. CodeRabbit did not appear on the fork review surface and did not respond to an explicit `@coderabbitai review` request, so repository policy still blocks merge despite the independent PASS verdicts above.
