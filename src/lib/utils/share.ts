@@ -25,6 +25,7 @@ import {
   CATEGORY_TO_ABBREV,
   ABBREV_TO_CATEGORY,
   SHARE_FORMAT_VERSION,
+  projectMinimalRackulaFit,
   type MinimalLayout,
   type MinimalLayoutV2,
   type MinimalDeviceType,
@@ -225,6 +226,7 @@ function convertDeviceTypes(
       );
     }
 
+    const sharedFit = projectMinimalRackulaFit(item.rf);
     const projected: DeviceType = {
       slug: item.s,
       u_height: item.h,
@@ -255,7 +257,7 @@ function convertDeviceTypes(
       ...(item.fd !== undefined ? { is_full_depth: item.fd } : {}),
       ...(item.fi ? { front_image: true } : {}),
       ...(item.ri ? { rear_image: true } : {}),
-      ...(item.rf ? { custom_fields: { rackula_fit: item.rf } } : {}),
+      ...(sharedFit ? { custom_fields: { rackula_fit: sharedFit } } : {}),
     };
     return useAuthoritativeSnapshots
       ? projected

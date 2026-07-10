@@ -100,46 +100,53 @@ function isKnownShareCategoryAbbreviation(value: string): boolean {
   return value in ABBREV_TO_CATEGORY;
 }
 
-const ShareCategoryAbbreviationSchema = z
-  .string()
-  .length(1)
-  .refine(isKnownShareCategoryAbbreviation, {
-    message: "Unknown device category abbreviation",
-  });
+const ShareCategoryAbbreviationSchema = z.string().length(1);
 
 function hasUniqueItems(values: readonly unknown[]): boolean {
   return new Set(values).size === values.length;
 }
 
-const MinimalFitDimensionsSchema = z
-  .object({
-    width: z.number().finite().optional(),
-    depth: z.number().finite().optional(),
-    height: z.number().finite().optional(),
-    length: z.number().finite().optional(),
-  })
-  .strict();
-
+const MinimalFitDimensionsShape = {
+  width: z.number().finite().optional(),
+  depth: z.number().finite().optional(),
+  height: z.number().finite().optional(),
+  length: z.number().finite().optional(),
+};
+const MinimalFitDimensionsProjectionSchema = z.object(
+  MinimalFitDimensionsShape,
+);
+const MinimalFitDimensionsSchema = z.object(MinimalFitDimensionsShape).strict();
 const MinimalFitSlugListSchema = z
   .array(z.string().min(1))
   .max(MAX_SHARE_FIT_LIST_ITEMS);
 
-export const MinimalRackulaFitSchema = z
-  .object({
-    status: z.string().optional(),
-    mount_type: z.string().optional(),
-    recommended_tray_u: z.number().finite().optional(),
-    rackmate_t1_plus_depth_mm: z.number().finite().optional(),
-    rackmate_t1_plus_depth_clearance_mm: z.number().finite().optional(),
-    rack_internal_depth_mm: z.number().finite().optional(),
-    max_planned_child_u: z.number().finite().optional(),
-    dimensions_mm: MinimalFitDimensionsSchema.optional(),
-    reported_dimensions_mm: MinimalFitDimensionsSchema.optional(),
-    recommended_mount_slugs: MinimalFitSlugListSchema.optional(),
-    recommended_tray_slugs: MinimalFitSlugListSchema.optional(),
-    open_checks: z.array(z.string()).max(MAX_SHARE_FIT_LIST_ITEMS).optional(),
-  })
-  .strict();
+const MinimalRackulaFitObjectSchema = z.object({
+  status: z.string().optional(),
+  mount_type: z.string().optional(),
+  recommended_tray_u: z.number().finite().optional(),
+  rackmate_t1_plus_depth_mm: z.number().finite().optional(),
+  rackmate_t1_plus_depth_clearance_mm: z.number().finite().optional(),
+  rack_internal_depth_mm: z.number().finite().optional(),
+  max_planned_child_u: z.number().finite().optional(),
+  dimensions_mm: MinimalFitDimensionsSchema.optional(),
+  reported_dimensions_mm: MinimalFitDimensionsSchema.optional(),
+  recommended_mount_slugs: MinimalFitSlugListSchema.optional(),
+  recommended_tray_slugs: MinimalFitSlugListSchema.optional(),
+  open_checks: z.array(z.string()).max(MAX_SHARE_FIT_LIST_ITEMS).optional(),
+});
+const MinimalRackulaFitProjectionSchema = MinimalRackulaFitObjectSchema.extend({
+  dimensions_mm: MinimalFitDimensionsProjectionSchema.optional(),
+  reported_dimensions_mm: MinimalFitDimensionsProjectionSchema.optional(),
+});
+export const MinimalRackulaFitSchema = MinimalRackulaFitObjectSchema.strict();
+export function projectMinimalRackulaFit(
+  value: unknown,
+): z.infer<typeof MinimalRackulaFitSchema> | undefined {
+  const result = MinimalRackulaFitProjectionSchema.safeParse(value);
+  return result.success && Object.keys(result.data).length > 0
+    ? result.data
+    : undefined;
+}
 
 // =============================================================================
 // Minimal Format Schemas
@@ -191,9 +198,6 @@ export const MinimalSlotSchema = z.object({
   a: z
     .array(ShareCategoryAbbreviationSchema)
     .max(MAX_SHARE_ACCEPTED_CATEGORIES)
-    .refine(hasUniqueItems, {
-      message: "Accepted device categories must be unique",
-    })
     .optional(),
 });
 
@@ -233,9 +237,6 @@ export const MinimalDeviceTypeSchema = z.object({
       z.union([z.literal(10), z.literal(19), z.literal(21), z.literal(23)]),
     )
     .max(MAX_SHARE_RACK_WIDTHS_PER_DEVICE_TYPE)
-    .refine(hasUniqueItems, {
-      message: "Compatible rack widths must be unique",
-    })
     .optional(),
   /** full-depth collision behavior */
   fd: z.boolean().optional(),
@@ -243,7 +244,8 @@ export const MinimalDeviceTypeSchema = z.object({
   fi: z.literal(1).optional(),
   ri: z.literal(1).optional(),
   /** fit metadata needed for physical placement checks */
-  rf: MinimalRackulaFitSchema.optional(),
+  // Legacy links treated this extension as unknown; v3 validates it at root.
+  rf: z.unknown().optional(),
   /** compact definition is authoritative (required by format v3) */
   o: z.literal(1).optional(),
 });
@@ -394,9 +396,9 @@ export const MinimalLayoutV2Schema = z
       seenRackIds.add(rackId);
     }
 
-    // Legacy formats keep their historical unknown-category fallback. In v3,
-    // compact definitions are authoritative and an unknown abbreviation is
-    // corruption rather than a value that can be rewritten to "other".
+    // Legacy formats keep their historical stripping and fallback behavior. In
+    // v3, compact definitions and references are authoritative, so ambiguous or
+    // unknown nested data is corruption rather than something to repair.
     if (layout.fv === SHARE_FORMAT_VERSION) {
       for (
         let deviceTypeIndex = 0;
@@ -410,6 +412,135 @@ export const MinimalLayoutV2Schema = z
             message: "Unknown authoritative device category abbreviation",
             path: ["dt", deviceTypeIndex, "x"],
           });
+        }
+
+        const deviceType = layout.dt[deviceTypeIndex]!;
+        if (deviceType.rw && !hasUniqueItems(deviceType.rw)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Compatible rack widths must be unique",
+            path: ["dt", deviceTypeIndex, "rw"],
+          });
+        }
+        if (
+          deviceType.rf !== undefined &&
+          !MinimalRackulaFitSchema.safeParse(deviceType.rf).success
+        ) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Fit metadata must use the public compact schema",
+            path: ["dt", deviceTypeIndex, "rf"],
+          });
+        }
+
+        for (
+          let slotIndex = 0;
+          slotIndex < (deviceType.sl?.length ?? 0);
+          slotIndex++
+        ) {
+          const categories = deviceType.sl![slotIndex]!.a;
+          if (!categories) continue;
+
+          if (!hasUniqueItems(categories)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Accepted device categories must be unique",
+              path: ["dt", deviceTypeIndex, "sl", slotIndex, "a"],
+            });
+          }
+          for (
+            let categoryIndex = 0;
+            categoryIndex < categories.length;
+            categoryIndex++
+          ) {
+            if (!isKnownShareCategoryAbbreviation(categories[categoryIndex]!)) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "Unknown accepted device category abbreviation",
+                path: [
+                  "dt",
+                  deviceTypeIndex,
+                  "sl",
+                  slotIndex,
+                  "a",
+                  categoryIndex,
+                ],
+              });
+            }
+          }
+        }
+      }
+
+      for (let rackIndex = 0; rackIndex < layout.rs.length; rackIndex++) {
+        const devices = layout.rs[rackIndex]!.d;
+        for (let deviceIndex = 0; deviceIndex < devices.length; deviceIndex++) {
+          const device = devices[deviceIndex]!;
+          const hasParent = device.ci !== undefined;
+          const hasSlot = device.si !== undefined;
+
+          if (hasParent !== hasSlot) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Container parent and slot references must be paired",
+              path: ["rs", rackIndex, "d", deviceIndex],
+            });
+            continue;
+          }
+          if (!hasParent) continue;
+
+          const parentIndex = device.ci!;
+          const parent = devices[parentIndex];
+          if (
+            parentIndex === deviceIndex ||
+            parent === undefined ||
+            parent.ci !== undefined ||
+            parent.si !== undefined
+          ) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Container parent reference is invalid",
+              path: ["rs", rackIndex, "d", deviceIndex, "ci"],
+            });
+          }
+        }
+      }
+
+      const assignedGroupRackIds = new Set<string>();
+      for (
+        let groupIndex = 0;
+        groupIndex < (layout.rg?.length ?? 0);
+        groupIndex++
+      ) {
+        const groupRackIds = new Set<string>();
+        const group = layout.rg![groupIndex]!;
+        for (
+          let referenceIndex = 0;
+          referenceIndex < group.rs.length;
+          referenceIndex++
+        ) {
+          const rackId = group.rs[referenceIndex]!;
+          if (!seenRackIds.has(rackId)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Rack group references unknown compact rack ID: ${rackId}`,
+              path: ["rg", groupIndex, "rs", referenceIndex],
+            });
+          }
+          if (groupRackIds.has(rackId)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Rack group contains duplicate compact rack ID: ${rackId}`,
+              path: ["rg", groupIndex, "rs", referenceIndex],
+            });
+          } else if (assignedGroupRackIds.has(rackId)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Compact rack belongs to more than one group: ${rackId}`,
+              path: ["rg", groupIndex, "rs", referenceIndex],
+            });
+          }
+          groupRackIds.add(rackId);
+          assignedGroupRackIds.add(rackId);
         }
       }
     }
