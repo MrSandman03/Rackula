@@ -14,6 +14,11 @@ import {
   formatConflictMessage,
   getConflictDetails,
 } from "$lib/utils/rack-resize";
+import {
+  BAYED_PROFILE_DIVERGENCE_ERROR,
+  isBayedRackUpdateAllowed,
+  type BayedRackUpdateContext,
+} from "$lib/utils/rack-bay-invariants";
 
 export type RackProfileSelection = "generic" | "rackmate";
 
@@ -27,7 +32,7 @@ export function planRackProfileChange(
   rack: Rack,
   deviceTypes: DeviceType[],
   profile: RackProfileSelection,
-  isBayed: boolean,
+  bayedContext?: BayedRackUpdateContext,
 ): RackProfileChangePlan {
   const selectRackMate = profile === "rackmate";
   if (
@@ -39,15 +44,24 @@ export function planRackProfileChange(
     return { kind: "noop" };
   }
 
-  if (isBayed) {
+  const updates: Partial<Rack> = selectRackMate
+    ? {
+        width: RACKMATE_T1_PLUS_WIDTH,
+        height: RACKMATE_T1_PLUS_HEIGHT,
+        depth_mm: RACKMATE_T1_PLUS_DEPTH_MM,
+        profile: RACKMATE_T1_PLUS_PROFILE,
+      }
+    : { profile: "generic" };
+
+  if (!isBayedRackUpdateAllowed(rack, updates, bayedContext)) {
     return {
       kind: "error",
-      message: "Bayed rack profiles must be changed as a group.",
+      message: BAYED_PROFILE_DIVERGENCE_ERROR,
     };
   }
 
   if (!selectRackMate) {
-    return { kind: "update", updates: { profile: "generic" } };
+    return { kind: "update", updates };
   }
 
   const result = canFitRackDimensions(
@@ -69,11 +83,6 @@ export function planRackProfileChange(
 
   return {
     kind: "update",
-    updates: {
-      width: RACKMATE_T1_PLUS_WIDTH,
-      height: RACKMATE_T1_PLUS_HEIGHT,
-      depth_mm: RACKMATE_T1_PLUS_DEPTH_MM,
-      profile: RACKMATE_T1_PLUS_PROFILE,
-    },
+    updates,
   };
 }

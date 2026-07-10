@@ -26,6 +26,10 @@
   } from "$lib/types/constants";
   import { isRackMateT1Plus } from "$lib/utils/rack-profile";
   import { planRackProfileChange } from "$lib/utils/rack-profile-change";
+  import {
+    BAYED_WIDTH_DIVERGENCE_ERROR,
+    isBayedRackUpdateAllowed,
+  } from "$lib/utils/rack-bay-invariants";
   import type { Rack } from "$lib/types";
 
   interface Props {
@@ -214,8 +218,18 @@
       return;
     }
 
-    if (isBayedRack) {
-      setResizeError("width", "Bayed rack widths must be changed as a group.");
+    const updates = {
+      width,
+      ...(isRackMateRack ? { profile: "generic" as const } : {}),
+    };
+    if (
+      rackGroup?.layout_preset === "bayed" &&
+      !isBayedRackUpdateAllowed(rack, updates, {
+        group: rackGroup,
+        racks: layoutStore.racks,
+      })
+    ) {
+      setResizeError("width", BAYED_WIDTH_DIVERGENCE_ERROR);
       return;
     }
 
@@ -241,10 +255,7 @@
     }
 
     clearResizeError();
-    layoutStore.updateRack(rack.id, {
-      width,
-      ...(isRackMateRack ? { profile: "generic" as const } : {}),
-    });
+    layoutStore.updateRack(rack.id, updates);
   }
 
   function handleProfileChange(profile: "generic" | "rackmate") {
@@ -252,7 +263,9 @@
       rack,
       layoutStore.device_types,
       profile,
-      isBayedRack,
+      rackGroup?.layout_preset === "bayed"
+        ? { group: rackGroup, racks: layoutStore.racks }
+        : undefined,
     );
 
     if (plan.kind === "noop") {
@@ -380,12 +393,12 @@
       </div>
     </div>
 
-    <!-- Width (read-only for bayed and RackMate racks) -->
-    {#if isBayedRack || isRackMateRack}
+    <!-- Named profiles own their width; generic bay members can repair drift. -->
+    {#if isRackMateRack}
       <div class="form-group">
         <span class="form-label">Width</span>
         <div class="read-only-value">
-          {rack.width}"{isRackMateRack ? " (RackMate T1 Plus)" : " (Bayed)"}
+          {rack.width}" (RackMate T1 Plus)
         </div>
       </div>
     {:else}

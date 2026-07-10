@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EditPanelRack from "$lib/components/EditPanelRack.svelte";
@@ -469,14 +469,15 @@ describe("EditPanelRack RackMate presets", () => {
     render(EditPanelRack, {
       props: { selectedRack: rack, selectedGroup: group },
     });
+    const profile = screen.getByRole("group", { name: "Rack profile" });
     await user.click(screen.getByRole("button", { name: "RackMate T1 Plus" }));
 
     expect(updateRack).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Depth (mm)")).toHaveValue(1000);
     expect(screen.getByLabelText("Height")).toHaveValue(42);
-    expect(
-      screen.getByText(/Bayed rack profiles must be changed as a group/),
-    ).toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/make the bayed rack profiles diverge/);
+    expect(profile).toHaveAttribute("aria-describedby", alert.id);
   });
 
   it("rejects a per-member width change in a generic bayed group", async () => {
@@ -493,12 +494,13 @@ describe("EditPanelRack RackMate presets", () => {
     render(EditPanelRack, {
       props: { selectedRack: rack, selectedGroup: group },
     });
-    await user.click(screen.getByRole("button", { name: '10"' }));
+    const width = screen.getByRole("group", { name: "Rack width in inches" });
+    await user.click(within(width).getByRole("button", { name: '10"' }));
 
     expect(updateRack).not.toHaveBeenCalled();
-    expect(
-      screen.getByText(/Bayed rack widths must be changed as a group/),
-    ).toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/make the bayed rack widths diverge/);
+    expect(width).toHaveAttribute("aria-describedby", alert.id);
   });
 
   it("keeps existing history intact when the active RackMate preset is clicked", async () => {

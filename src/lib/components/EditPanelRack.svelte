@@ -35,6 +35,10 @@
   } from "$lib/types/constants";
   import { isRackMateT1Plus } from "$lib/utils/rack-profile";
   import { planRackProfileChange } from "$lib/utils/rack-profile-change";
+  import {
+    BAYED_WIDTH_DIVERGENCE_ERROR,
+    isBayedRackUpdateAllowed,
+  } from "$lib/utils/rack-bay-invariants";
   import type {
     Rack,
     RackGroup,
@@ -265,8 +269,18 @@
 
     const group =
       selectedGroup ?? layoutStore.getRackGroupForRack(selectedRack.id);
-    if (group?.layout_preset === "bayed") {
-      setResizeError("width", "Bayed rack widths must be changed as a group.");
+    const updates = {
+      width,
+      ...(isRackMateRack ? { profile: "generic" as const } : {}),
+    };
+    if (
+      group?.layout_preset === "bayed" &&
+      !isBayedRackUpdateAllowed(selectedRack, updates, {
+        group,
+        racks: layoutStore.racks,
+      })
+    ) {
+      setResizeError("width", BAYED_WIDTH_DIVERGENCE_ERROR);
       rackHeight = selectedRack.height;
       rackDepth = selectedRack.depth_mm ?? DEFAULT_RACK_DEPTH_MM;
       return;
@@ -294,10 +308,7 @@
     }
 
     clearResizeError();
-    layoutStore.updateRack(selectedRack.id, {
-      width,
-      ...(isRackMateRack ? { profile: "generic" as const } : {}),
-    });
+    layoutStore.updateRack(selectedRack.id, updates);
   }
 
   function handleProfileChange(profile: "generic" | "rackmate") {
@@ -307,7 +318,9 @@
       selectedRack,
       layoutStore.device_types,
       profile,
-      group?.layout_preset === "bayed",
+      group?.layout_preset === "bayed"
+        ? { group, racks: layoutStore.racks }
+        : undefined,
     );
 
     if (plan.kind === "noop") {
