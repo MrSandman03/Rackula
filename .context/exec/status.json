@@ -47,7 +47,7 @@
     "exec-20260710-201219-rackula-line-limits": {
       "session_path": ".context/exec/sessions/exec-20260710-201219-rackula-line-limits",
       "task": "Split all inherited Rackula source and test files above the 1,000-line hard limit",
-      "stage": "executing",
+      "stage": "pr_open",
       "current_step": 6,
       "total_steps": 6,
       "base_branch": "main",
@@ -55,11 +55,19 @@
       "branch": "fix/legacy-line-limits",
       "worktree": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
       "blockers": [],
-      "last_event": "Review gaps are fixed and verified in d1e297a9; a new exact-head cold review is next.",
-      "last_updated": "2026-07-10T21:14:46Z"
+      "last_event": "Exact-head review passed at 1169b77f; main target lock acquired for draft PR creation.",
+      "last_updated": "2026-07-10T21:23:38Z"
     }
   },
-  "target_locks": {},
-  "last_updated": "2026-07-10T21:14:46Z",
-  "last_event": "Review gaps are fixed and verified in d1e297a9; a new exact-head cold review is next."
+  "target_locks": {
+    "main": {
+      "session_id": "exec-20260710-201219-rackula-line-limits",
+      "stage": "pr_open",
+      "branch": "fix/legacy-line-limits",
+      "since": "2026-07-10T21:23:38Z",
+      "last_updated": "2026-07-10T21:23:38Z"
+    }
+  },
+  "last_updated": "2026-07-10T21:23:38Z",
+  "last_event": "Exact-head review passed at 1169b77f; main target lock acquired for draft PR creation."
 }

@@ -65,3 +65,12 @@
 - The real generator ran twice with byte-identical output; both workflow YAML files parse and the exact CI freshness shell gate passes.
 - File lengths, formatting, ESLint, Svelte/TypeScript diagnostics, production build, ledger validation, and diff hygiene all pass.
 - Step 6 remains in review until independent reviewers approve the new exact head.
+
+## 2026-07-10T21:23:38Z - Exact-head review passed
+
+- Three independent review paths returned `PASS` at exact clean head `1169b77f998bc98dd7a68b17f27c590a6c26cdb7`.
+- The reviewer who raised the three closure gaps confirmed each is fully fixed and found no new regression or weak blocking test.
+- The broad reviewer revalidated zero line violations, all 576 bundled mappings in exact order, all 112 Ubiquiti entries in exact order, public exports, workflow syntax, generator safety, and corrected ledger provenance.
+- A separate generator/workflow specialist confirmed direct CLI compatibility, side-effect-free imports, pre-replacement validation, drift detection, dry-run behavior, and the five integration-test cases.
+- Residual non-blocking risk is limited to crash/write-failure atomicity after generated-directory removal and trusted injectable paths used only by tests.
+- Acquired the serialized `main` target lock before pushing or opening the draft PR.

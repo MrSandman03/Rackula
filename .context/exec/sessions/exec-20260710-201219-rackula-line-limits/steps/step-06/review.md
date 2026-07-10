@@ -17,3 +17,11 @@ Two independent reviewers returned `PASS` for behavior preservation across the U
 3. Correct inaccurate commit provenance and the largest-file metric in the exec ledger.
 
 The implementation and evidence fixes are required before a new exact-head review.
+
+## Retry 1
+
+- Reviewed head: `1169b77f998bc98dd7a68b17f27c590a6c26cdb7`
+- Verdict: `PASS`
+- Independent paths: broad full-branch review, original-finding re-review, and generator/workflow specialist review
+- Findings: none
+- Non-blocking residuals: crash/write-failure atomicity after generated-directory removal, test-only injected path trust, hosted PR CI, and unavailable local WebKit
