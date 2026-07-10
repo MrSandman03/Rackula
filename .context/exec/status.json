@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "current_session_id": "exec-20260709-201348-rackmate-post-audit",
+  "current_session_id": null,
   "sessions": {
     "20260709-054449-rackmate-agentic-review": {
       "session_path": ".context/exec/sessions/20260709-054449-rackmate-agentic-review",
@@ -33,27 +33,19 @@
     "exec-20260709-201348-rackmate-post-audit": {
       "session_path": ".context/exec/sessions/exec-20260709-201348-rackmate-post-audit",
       "task": "Cold-review and repair the RackMate fork work merged by PR #1",
-      "stage": "pr_open",
+      "stage": "done",
       "current_step": 5,
       "total_steps": 5,
       "base_branch": "main",
       "target_branch": "main",
-      "branch": "fix/rackmate-post-audit",
-      "worktree": "/Users/gavin/projects/p-rackula-minirack-worktrees/rackmate-post-audit",
+      "branch": "main",
+      "worktree": ".",
       "blockers": [],
-      "last_event": "Owner removed the inherited external review integration and adopted exact-head independent review plus explicit human merge approval; PR #2 remains draft.",
-      "last_updated": "2026-07-10T08:33:29Z"
+      "last_event": "PR #2 merged, post-merge verification passed, the CodeQL finding was fixed, the target lock was released, and the session closed.",
+      "last_updated": "2026-07-10T20:01:52Z"
     }
   },
-  "target_locks": {
-    "main": {
-      "session_id": "exec-20260709-201348-rackmate-post-audit",
-      "stage": "pr_open",
-      "branch": "fix/rackmate-post-audit",
-      "since": "2026-07-10T06:00:46Z",
-      "last_updated": "2026-07-10T08:33:29Z"
-    }
-  },
-  "last_updated": "2026-07-10T08:33:29Z",
-  "last_event": "Owner removed the inherited external review integration and adopted exact-head independent review plus explicit human merge approval; PR #2 remains draft."
+  "target_locks": {},
+  "last_updated": "2026-07-10T20:01:52Z",
+  "last_event": "PR #2 merged, post-merge verification passed, the CodeQL finding was fixed, the target lock was released, and the session closed."
 }

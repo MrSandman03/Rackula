@@ -84,3 +84,27 @@
 - Commit `593b63b5` resolved those findings by removing Dependabot auto-merge, aligning all active PR-producing commands, documenting hosted fork CI, and marking optional Claude review as non-gating.
 - The second review cycle returned one PASS and one minor documentation finding. The stale review-command extension point was removed in the ledger closure commit.
 - The obsolete external-service blocker is cleared. PR #2 remains draft and unmerged; the main target lock stays held pending fresh checks and explicit human approval.
+
+## 2026-07-10T18:16:05Z - PR #2 merged
+
+- The user explicitly approved the merge in chat: "ok continue you can merge".
+- Marked PR #2 ready and squash-merged reviewed head `0d745bb4` into fork `main` as `f22f81a2`; GitHub deleted the remote feature branch.
+- The approved head and merge commit both resolve to tree `5ebf602a54a1148a031cf3d365eae2b0c9131712`; their direct diff is empty.
+- The PR had 10 successful applicable checks, no failed or pending checks, and only optional or non-applicable skipped jobs.
+- Retained the `main` target lock for post-merge verification.
+
+## 2026-07-10T19:52:05Z - Post-merge security finding repaired
+
+- The first merged-branch CodeQL run passed but found alert #1, `actions/untrusted-checkout/medium`, in the inherited autoformat workflow.
+- Two independent security reviews confirmed the alert was a true positive: untrusted formatter code could create a patch artifact consumed by a privileged PAT-backed push job.
+- The initial Security Triage run could not invoke its optional Claude step because `CLAUDE_CODE_OAUTH_TOKEN` is not configured; the finding was assessed locally instead of dismissed.
+- Commit `339380ee` removed the privileged autoformat bridge and corrected its active documentation while retaining pre-commit and blocking CI formatting enforcement.
+- Two independent reviewers returned PASS on exact commit `339380ee` before it was pushed to `main` under the held target lock.
+
+## 2026-07-10T19:59:37Z - Final verification and closure
+
+- On merge commit `f22f81a2`, `pnpm test:run` passed 235 files / 3,577 tests; lint, format, Svelte checks, and build also passed.
+- CodeQL run `29119623088` passed on security commit `339380ee`; alert #1 was automatically marked fixed, not dismissed.
+- Security Triage run `29119731261` passed with zero net-new open CodeQL alerts and correctly skipped the external Claude step.
+- The Code Scanning API reports no open CodeQL alerts on `main`.
+- Session closed successfully and the `main` target lock was released. Local worktree and branch cleanup follows the reviewed closure push.
