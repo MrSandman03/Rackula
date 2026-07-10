@@ -114,7 +114,6 @@ Every applicable GitHub-hosted check must pass on the exact reviewed PR head. Fo
 - `Test / visual regression`
 - `Performance Budget / bundle budget`
 - `Compose Parity / check`
-- `Autoformat PRs / format`
 - CodeQL analysis jobs
 
 Skipped jobs are not failures, but every non-skipped check must conclude successfully. The core validation workflow runs on:
