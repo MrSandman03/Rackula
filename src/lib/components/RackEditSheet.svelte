@@ -10,17 +10,20 @@
   import { getLayoutStore } from "$lib/stores/layout.svelte";
   import { getCanvasStore } from "$lib/stores/canvas.svelte";
   import {
+    canFitRackDimensions,
     canResizeRackTo,
     getConflictDetails,
     formatConflictMessage,
   } from "$lib/utils/rack-resize";
   import {
     COMMON_RACK_HEIGHTS,
+    DEFAULT_RACK_DEPTH_MM,
     MINI_RACK_HEIGHTS,
     RACKMATE_T1_PLUS_HEIGHT,
     RACKMATE_T1_PLUS_DEPTH_MM,
   } from "$lib/types/constants";
   import { isRackMateT1Plus } from "$lib/utils/rack-profile";
+  import { planRackProfileChange } from "$lib/utils/rack-profile-change";
   import type { Rack } from "$lib/types";
 
   interface Props {
@@ -32,13 +35,29 @@
 
   const layoutStore = getLayoutStore();
   const canvasStore = getCanvasStore();
+  const widthOptions = [10, 19, 21, 23] as const;
+
+  type ResizeErrorSource = "height" | "width" | "profile";
 
   // Local state for form fields (synced from rack prop)
   // Using untrack() to capture initial values - the $effect below handles reactive updates
   let rackName = $state(untrack(() => rack.name));
   let rackHeight = $state(untrack(() => rack.height));
+  let rackDepth = $state(untrack(() => rack.depth_mm ?? DEFAULT_RACK_DEPTH_MM));
   let rackNotes = $state(untrack(() => rack.notes ?? ""));
   let resizeError = $state<string | null>(null);
+  let resizeErrorSource = $state<ResizeErrorSource | null>(null);
+  let depthError = $state<string | null>(null);
+
+  function clearResizeError() {
+    resizeError = null;
+    resizeErrorSource = null;
+  }
+
+  function setResizeError(source: ResizeErrorSource, message: string) {
+    resizeError = message;
+    resizeErrorSource = source;
+  }
 
   // Check if this rack is part of a bayed group
   const rackGroup = $derived(layoutStore.getRackGroupForRack(rack.id));
@@ -62,13 +81,17 @@
   $effect(() => {
     rackName = rack.name;
     rackHeight = rack.height;
+    rackDepth = rack.depth_mm ?? DEFAULT_RACK_DEPTH_MM;
     rackNotes = rack.notes ?? "";
-    resizeError = null;
+    clearResizeError();
+    depthError = null;
   });
 
   $effect(() => {
     if (!isRackMateRack) return;
     if (rack.depth_mm !== RACKMATE_T1_PLUS_DEPTH_MM) {
+      rackDepth = RACKMATE_T1_PLUS_DEPTH_MM;
+      depthError = null;
       layoutStore.updateRack(rack.id, {
         depth_mm: RACKMATE_T1_PLUS_DEPTH_MM,
       });
@@ -88,7 +111,10 @@
         validation.conflicts,
         layoutStore.device_types,
       );
-      resizeError = `RackMate T1 Plus is 8U; ${formatConflictMessage(conflicts)}`;
+      setResizeError(
+        "height",
+        `RackMate T1 Plus is 8U; ${formatConflictMessage(conflicts)}`,
+      );
       rackHeight = rack.height;
     }
   });
@@ -119,7 +145,7 @@
   // Validate and apply height change
   function attemptHeightChange(newHeight: number): boolean {
     if (isRackMateRack && newHeight !== RACKMATE_T1_PLUS_HEIGHT) {
-      resizeError = "RackMate T1 Plus is fixed at 8U";
+      setResizeError("height", "RackMate T1 Plus is fixed at 8U");
       rackHeight = rack.height;
       return false;
     }
@@ -136,13 +162,13 @@
         validation.conflicts,
         layoutStore.device_types,
       );
-      resizeError = formatConflictMessage(conflicts);
+      setResizeError("height", formatConflictMessage(conflicts));
       rackHeight = rack.height; // Reset to current
       return false;
     }
 
     // Clear error and apply change
-    resizeError = null;
+    clearResizeError();
     layoutStore.updateRack(rack.id, { height: newHeight });
     // Reset view to center the resized rack
     canvasStore.fitAll(layoutStore.rack ? [layoutStore.rack] : []);
@@ -162,6 +188,96 @@
   function handlePresetClick(preset: number) {
     rackHeight = preset;
     attemptHeightChange(preset);
+  }
+
+  function handleWidthPresetClick(width: Rack["width"]) {
+    if (width === rack.width) {
+      clearResizeError();
+      return;
+    }
+
+    if (isBayedRack) {
+      setResizeError("width", "Bayed rack widths must be changed as a group.");
+      return;
+    }
+
+    const result = canFitRackDimensions(
+      rack,
+      {
+        width,
+        height: rack.height,
+        depth_mm: rack.depth_mm,
+      },
+      layoutStore.device_types,
+    );
+    if (!result.allowed) {
+      const conflicts = getConflictDetails(
+        result.conflicts,
+        layoutStore.device_types,
+      );
+      setResizeError(
+        "width",
+        `${width}-inch rails cannot contain ${formatConflictMessage(conflicts)}`,
+      );
+      return;
+    }
+
+    clearResizeError();
+    layoutStore.updateRack(rack.id, {
+      width,
+      ...(isRackMateRack ? { profile: "generic" as const } : {}),
+    });
+  }
+
+  function handleProfileChange(profile: "generic" | "rackmate") {
+    const plan = planRackProfileChange(
+      rack,
+      layoutStore.device_types,
+      profile,
+      isBayedRack,
+    );
+
+    if (plan.kind === "noop") {
+      clearResizeError();
+      return;
+    }
+    if (plan.kind === "error") {
+      setResizeError("profile", plan.message);
+      rackHeight = rack.height;
+      rackDepth = rack.depth_mm ?? DEFAULT_RACK_DEPTH_MM;
+      return;
+    }
+
+    rackHeight = plan.updates.height ?? rack.height;
+    rackDepth = plan.updates.depth_mm ?? rack.depth_mm ?? DEFAULT_RACK_DEPTH_MM;
+    clearResizeError();
+    depthError = null;
+    layoutStore.updateRack(rack.id, plan.updates);
+  }
+
+  function applyDepth(value: number) {
+    if (isRackMateRack && value !== RACKMATE_T1_PLUS_DEPTH_MM) {
+      depthError = "RackMate T1 Plus depth is locked to 260 mm.";
+      rackDepth = RACKMATE_T1_PLUS_DEPTH_MM;
+      return;
+    }
+
+    if (!Number.isFinite(value) || value <= 0) {
+      depthError = "Depth must be a positive number in millimetres.";
+      rackDepth = rack.depth_mm ?? DEFAULT_RACK_DEPTH_MM;
+      return;
+    }
+
+    depthError = null;
+    rackDepth = value;
+    if (value !== rack.depth_mm) {
+      layoutStore.updateRack(rack.id, { depth_mm: value });
+    }
+  }
+
+  function handleDepthChange(event: Event) {
+    const raw = (event.target as HTMLInputElement).value;
+    applyDepth(raw.trim() === "" ? Number.NaN : Number(raw));
   }
 
   // Handle bay count change atomically
@@ -212,15 +328,21 @@
         type="number"
         id="rack-height-mobile"
         class="input-field"
-        class:error={resizeError !== null}
+        class:error={resizeErrorSource === "height"}
         bind:value={rackHeight}
         onchange={handleHeightChange}
         min="1"
         max="100"
         disabled={isRackMateRack}
+        aria-invalid={resizeErrorSource === "height"}
+        aria-describedby={resizeErrorSource === "height"
+          ? "rack-height-error-mobile"
+          : undefined}
       />
-      {#if resizeError}
-        <p class="helper-text error">Cannot resize: {resizeError}</p>
+      {#if resizeErrorSource === "height" && resizeError}
+        <p id="rack-height-error-mobile" class="helper-text error" role="alert">
+          Cannot resize: {resizeError}
+        </p>
       {:else if isRackMateRack}
         <p class="helper-text">RackMate T1 Plus is fixed at 8U / 260mm</p>
       {/if}
@@ -239,7 +361,7 @@
       </div>
     </div>
 
-    <!-- Width (read-only for bayed racks) -->
+    <!-- Width (read-only for bayed and RackMate racks) -->
     {#if isBayedRack || isRackMateRack}
       <div class="form-group">
         <span class="form-label">Width</span>
@@ -247,7 +369,88 @@
           {rack.width}"{isRackMateRack ? " (RackMate T1 Plus)" : " (Bayed)"}
         </div>
       </div>
+    {:else}
+      <div class="form-group">
+        <span class="form-label">Width</span>
+        <div
+          class="preset-row"
+          role="group"
+          aria-label="Rack width in inches"
+          aria-describedby={resizeErrorSource === "width"
+            ? "rack-width-error-mobile"
+            : undefined}
+        >
+          {#each widthOptions as option (option)}
+            <button
+              type="button"
+              class="preset-btn"
+              class:active={rack.width === option}
+              aria-pressed={rack.width === option}
+              onclick={() => handleWidthPresetClick(option)}
+            >
+              {option}"
+            </button>
+          {/each}
+        </div>
+        {#if resizeErrorSource === "width" && resizeError}
+          <p
+            id="rack-width-error-mobile"
+            class="helper-text error"
+            role="alert"
+          >
+            Cannot resize: {resizeError}
+          </p>
+        {/if}
+      </div>
     {/if}
+
+    <div class="form-group">
+      <span class="form-label">Profile</span>
+      <SegmentedControl
+        options={[
+          { value: "generic", label: "Generic" },
+          { value: "rackmate", label: "RackMate T1 Plus" },
+        ]}
+        value={isRackMateRack ? "rackmate" : "generic"}
+        onchange={(value) =>
+          handleProfileChange(value as "generic" | "rackmate")}
+        ariaLabel="Rack profile"
+        ariaDescribedBy={resizeErrorSource === "profile"
+          ? "rack-profile-error-mobile"
+          : undefined}
+      />
+      {#if resizeErrorSource === "profile" && resizeError}
+        <p
+          id="rack-profile-error-mobile"
+          class="helper-text error"
+          role="alert"
+        >
+          Cannot resize: {resizeError}
+        </p>
+      {/if}
+    </div>
+
+    <div class="form-group">
+      <label for="rack-depth-mobile">Depth (mm)</label>
+      <input
+        type="number"
+        id="rack-depth-mobile"
+        class="input-field"
+        class:error={depthError !== null}
+        bind:value={rackDepth}
+        onchange={handleDepthChange}
+        min="1"
+        step="1"
+        readonly={isRackMateRack}
+        aria-invalid={depthError !== null}
+        aria-describedby={depthError ? "rack-depth-error-mobile" : undefined}
+      />
+      {#if depthError}
+        <p id="rack-depth-error-mobile" class="helper-text error" role="alert">
+          {depthError}
+        </p>
+      {/if}
+    </div>
 
     <!-- Bay Count (only for bayed racks) -->
     {#if isBayedRack}
@@ -450,6 +653,12 @@
     display: flex;
     gap: var(--space-2);
     margin-top: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .preset-row {
+    display: flex;
+    gap: var(--space-2);
     flex-wrap: wrap;
   }
 

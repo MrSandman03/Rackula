@@ -174,7 +174,9 @@ test.describe("RackMate workflow", () => {
     ).toHaveCount(0);
   });
 
-  test("mobile editor preserves a generic 10-inch rack", async ({ page }) => {
+  test("mobile editor converts a generic rack to RackMate", async ({
+    page,
+  }) => {
     await useMobileViewport(page);
     const genericMiniRack = createTestLayout({
       name: "Generic Mini Rack",
@@ -192,9 +194,16 @@ test.describe("RackMate workflow", () => {
     await expect(height).toHaveValue("12");
     await expect(height).toBeEnabled();
     await expect(editor).not.toContainText("RackMate T1 Plus is fixed");
+
+    await editor.getByRole("button", { name: "RackMate T1 Plus" }).click();
+    await expect(height).toHaveValue("8");
+    await expect(height).toBeDisabled();
+    await expect(editor).toContainText(
+      "RackMate T1 Plus is fixed at 8U / 260mm",
+    );
   });
 
-  test("mobile editor locks the explicit RackMate profile", async ({
+  test("mobile editor can opt an explicit RackMate profile into Generic", async ({
     page,
   }) => {
     await useMobileViewport(page);
@@ -211,6 +220,44 @@ test.describe("RackMate workflow", () => {
     await expect(editor).toContainText(
       "RackMate T1 Plus is fixed at 8U / 260mm",
     );
+
+    await editor.getByRole("button", { name: "Generic" }).click();
+    await expect(height).toBeEnabled();
+    await expect(editor).not.toContainText("RackMate T1 Plus is fixed");
+
+    const width = editor.getByRole("group", { name: "Rack width in inches" });
+    await width.getByRole("button", { name: '19"' }).click();
+    await expect(width.getByRole("button", { name: '19"' })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    const depth = editor.getByLabel("Depth (mm)");
+    await expect(depth).toHaveValue("260");
+    await expect(depth).toBeEditable();
+    await depth.fill("600");
+    await depth.press("Tab");
+
+    await height.fill("12");
+    await height.press("Tab");
+    await expect(height).toHaveValue("12");
+    await expect(depth).toHaveValue("600");
+
+    await page.keyboard.press("Escape");
+    await expect(editor).not.toBeVisible();
+    await page.getByTestId("nav-tab-racks").click();
+    await page.locator('[data-testid^="mobile-rack-row-"]').click();
+
+    const reopened = page.getByRole("dialog", { name: "Edit Rack" });
+    await expect(reopened.getByLabel("Height", { exact: true })).toHaveValue(
+      "12",
+    );
+    await expect(reopened.getByLabel("Depth (mm)")).toHaveValue("600");
+    await expect(
+      reopened
+        .getByRole("group", { name: "Rack width in inches" })
+        .getByRole("button", { name: '19"' }),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   test("mobile palette exposes one touch-readable fit marker", async ({

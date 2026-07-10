@@ -250,6 +250,16 @@ describe("EditPanelRack RackMate presets", () => {
     expect(
       screen.getByText(/RackMate T1 Plus cannot contain Full Width Switch/),
     ).toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    const height = screen.getByLabelText("Height");
+    const width = screen.getByRole("group", { name: "Rack width in inches" });
+    const profile = screen.getByRole("group", { name: "Rack profile" });
+    expect(profile).not.toHaveAttribute("aria-invalid");
+    expect(profile).toHaveAttribute("aria-describedby", alert.id);
+    expect(height).toHaveAttribute("aria-invalid", "false");
+    expect(height).not.toHaveAttribute("aria-describedby");
+    expect(width).not.toHaveAttribute("aria-invalid");
+    expect(width).not.toHaveAttribute("aria-describedby");
     expect(layoutStore.undo()).toBe(false);
   });
 
@@ -280,7 +290,75 @@ describe("EditPanelRack RackMate presets", () => {
         /10-inch rails cannot contain Generic Full Width Switch/,
       ),
     ).toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    const height = screen.getByLabelText("Height");
+    const width = screen.getByRole("group", { name: "Rack width in inches" });
+    const profile = screen.getByRole("group", { name: "Rack profile" });
+    expect(width).not.toHaveAttribute("aria-invalid");
+    expect(width).toHaveAttribute("aria-describedby", alert.id);
+    expect(height).toHaveAttribute("aria-invalid", "false");
+    expect(height).not.toHaveAttribute("aria-describedby");
+    expect(profile).not.toHaveAttribute("aria-invalid");
+    expect(profile).not.toHaveAttribute("aria-describedby");
     expect(layoutStore.canUndo).toBe(false);
+  });
+
+  it("associates a locked RackMate height error only with Height", async () => {
+    const user = userEvent.setup();
+    const rack = createTestRack({
+      height: 8,
+      width: 10,
+      depth_mm: 260,
+      profile: "rackmate-t1-plus",
+    });
+
+    render(EditPanelRack, {
+      props: { selectedRack: rack, selectedGroup: null },
+    });
+    const height = screen.getByLabelText("Height");
+    await user.clear(height);
+    await user.type(height, "12");
+    await user.tab();
+
+    const alert = screen.getByRole("alert");
+    const width = screen.getByRole("group", { name: "Rack width in inches" });
+    const profile = screen.getByRole("group", { name: "Rack profile" });
+    expect(alert).toHaveTextContent("RackMate T1 Plus height is locked to 8U");
+    expect(height).toHaveAttribute("aria-invalid", "true");
+    expect(height).toHaveAttribute("aria-describedby", alert.id);
+    expect(width).not.toHaveAttribute("aria-invalid");
+    expect(width).not.toHaveAttribute("aria-describedby");
+    expect(profile).not.toHaveAttribute("aria-invalid");
+    expect(profile).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("announces an invalid depth only beside the Depth field", async () => {
+    const user = userEvent.setup();
+    const rack = createTestRack({ depth_mm: 600 });
+
+    render(EditPanelRack, {
+      props: { selectedRack: rack, selectedGroup: null },
+    });
+    const depth = screen.getByLabelText("Depth (mm)");
+    await user.clear(depth);
+    await user.tab();
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Depth must be a positive number in millimetres",
+    );
+    expect(depth).toHaveAttribute("aria-invalid", "true");
+    expect(depth).toHaveAttribute("aria-describedby", alert.id);
+    expect(screen.getByLabelText("Height")).toHaveAttribute(
+      "aria-invalid",
+      "false",
+    );
+    expect(
+      screen.getByRole("group", { name: "Rack width in inches" }),
+    ).not.toHaveAttribute("aria-describedby");
+    expect(
+      screen.getByRole("group", { name: "Rack profile" }),
+    ).not.toHaveAttribute("aria-describedby");
   });
 
   it("keeps a width-based RackMate exit generic after returning to 10 inches", async () => {
