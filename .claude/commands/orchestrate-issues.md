@@ -22,8 +22,8 @@ If no issue numbers were provided, ask which issues to work before doing anythin
    - ALWAYS: superpowers routing (brainstorming / systematic-debugging / TDD as the task fits)
    - IF security-sensitive: `/secure-coding`
    - IF frontend: `/frontend-design:frontend-design` Follow the project TDD protocol (test only high-value behaviour; skip low-value tests).
-4. **Self-review** — Run `/code-review` on the diff BEFORE opening the PR. Fix what it finds.
-5. **Open PR** — Verify local gates first (`npm run lint`, `npm run test:run`, `npm run build`), then push and `gh pr create`. Include `Co-Authored-By`.
+4. **Exact-head review** — Commit first, then dispatch a reviewer who did not implement the change to review the complete base-to-HEAD diff. Fix findings in new commits, re-verify, and repeat review on the new HEAD.
+5. **Open PR** — After an exact-head PASS, push and create a draft PR with the reviewed SHA, reviewer, verdict, and verification evidence. Include `Co-Authored-By`.
 
 ## Review-feedback loop (mandatory)
 
@@ -47,8 +47,8 @@ When the gate passes: `gh pr merge` (squash), then `gh issue close <N> --comment
 
 ## Stop conditions (per issue)
 
-Stop and record in `blockers-<N>.md` if: a test fails twice with no resolution, the issue is genuinely ambiguous and needs a human decision, or a merge conflict you can't cleanly resolve. Otherwise proceed autonomously to merge.
+Stop and record in `blockers-<N>.md` if: a test fails twice with no resolution, the issue is genuinely ambiguous and needs a human decision, or a merge conflict you can't cleanly resolve. Otherwise proceed autonomously to a reviewed, CI-green PR and stop for explicit human merge approval.
 
 ## Final report
 
-Per issue: status (MERGED / blocked / needs-decision), PR link, merge commit, and any follow-up issues filed.
+Per issue: status (READY / MERGED / blocked / needs-decision), PR link, reviewed SHA, merge commit when applicable, and any follow-up issues filed.

@@ -125,20 +125,23 @@ START
                          Run verification
                                │
                                ▼
-                    ┌──── /code-review ◀────────┐
-                    │          │                │
-                    │    Findings?              │
-                    │     yes      no           │
-                    │      │       │            │
-                    │      ▼       ▼            │
-                    │   Fix all  Commit ────────┘
-                    │   findings   │
-                    │      │       ▼
-                    └──────┘   Push (respect all
-                               repository hooks)
-                                   │
-                                   ▼
-                               Create PR
+                       Pre-commit diff check
+                               │
+                               ▼
+                             Commit
+                               │
+                               ▼
+                       Exact-head review
+                               │
+                    findings?  │
+                    yes: fix, verify, commit,
+                         and repeat review
+                    no         │
+                               ▼
+                              Push
+                               │
+                               ▼
+                           Create PR
                                    │
                     ┌──────────┴──────────┐
                     ▼                     ▼
@@ -235,51 +238,9 @@ Check CLAUDE.md for `### Verification Commands`. If found, run them:
 
 If not configured, skip or ask user.
 
-### 3d. Local Code Review (before PR)
+### 3d. Pre-Commit Diff Check
 
-**MANDATORY before opening a PR.** Review the diff and resolve findings before pushing.
-
-The reviewer must not have implemented the change. For high-risk or cross-cutting changes, use at least two independent reviewers.
-
-```
-┌─────────────────────────────────────────┐
-│            CODE REVIEW LOOP             │
-├─────────────────────────────────────────┤
-│                                         │
-│  1. Run /code-review (or fallback)      │
-│         │                               │
-│         ▼                               │
-│  2. Findings? ──no──▶ Proceed to commit │
-│         │                               │
-│        yes                              │
-│         ▼                               │
-│  3. Fix each finding                    │
-│         │                               │
-│         ▼                               │
-│  4. Re-run verification commands        │
-│         │                               │
-│         └────────▶ Back to step 1       │
-│                                         │
-└─────────────────────────────────────────┘
-```
-
-**Step 1: Run the review (auto-detect)**
-
-- **Preferred:** if a `/code-review` command is available in this environment, use it. It reviews the current diff for correctness bugs plus reuse/simplification/efficiency cleanups.
-- **Fallback:** if `/code-review` is unavailable, dispatch a read-only reviewer against the full diff. If no independent reviewer is available, stop and ask the user rather than substituting self-review.
-
-**Step 2: Fix findings**
-
-Address each finding. For multiple findings, track them as tasks and mark completed as you go.
-
-**Step 3: Re-verify**
-
-After fixing, re-run verification commands (lint, test, build), then re-review. Only proceed when the review is clean.
-
-**Exit Conditions:**
-
-- **Success:** review returns no findings → proceed to commit
-- **Max iterations (3):** if findings persist after 3 cycles, ask the user whether to proceed or abort
+Review the working diff against the acceptance criteria and repository rules to catch obvious issues before committing. Fix findings and re-run affected verification. This check is useful but does not satisfy the exact-head independent review gate.
 
 ### 3e. Commit
 
@@ -289,7 +250,11 @@ After fixing, re-run verification commands (lint, test, build), then re-review. 
 Fixes #<N>")
 ```
 
-### 3f. Push (respect repository hooks)
+### 3f. Exact-Head Review and Push
+
+After committing, record `git rev-parse HEAD` and dispatch a reviewer who did not implement the change to review the complete base-to-HEAD diff. Use at least two independent reviewers for high-risk or cross-cutting changes.
+
+If a reviewer finds an issue, fix it, re-run affected verification, create a new commit, and repeat review against the new HEAD. Only push after the exact commit has a PASS verdict and every finding is resolved or rebutted.
 
 ```bash
 (cd "$WORKTREE_DIR" && git push -u origin <branch>)
@@ -300,13 +265,20 @@ If a repository hook blocks the push, read its output and fix the underlying val
 ### 3g. Create PR
 
 ```bash
-(cd "$WORKTREE_DIR" && gh pr create \
+(cd "$WORKTREE_DIR" && gh pr create --draft \
   --title "<type>: <description> (#<N>)" \
   --body "## Summary
 <bullets>
 
 ## Test Plan
 - [ ] <verification>
+
+## Review Evidence
+- Reviewed commit: <full SHA>
+- Independent reviewer: <name or agent>
+- Verdict: PASS
+- [ ] All applicable GitHub checks pass on the reviewed commit
+- [ ] No commits were added after the recorded review
 
 Closes #<N>")
 ```

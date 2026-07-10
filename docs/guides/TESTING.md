@@ -106,11 +106,18 @@ Use it to:
 
 ### Required CI Checks
 
-Branch protection should require the core CI validation check from `.github/workflows/test.yml`:
+Every applicable GitHub-hosted check must pass on the exact reviewed PR head. For this fork, that normally includes:
 
-- **Check name:** `Test / validate`
+- `Test / validate`
+- `Test / api (typecheck + tests)`
+- `Test / a11y (axe-core)`
+- `Test / visual regression`
+- `Performance Budget / bundle budget`
+- `Compose Parity / check`
+- `Autoformat PRs / format`
+- CodeQL analysis jobs
 
-This check runs on:
+Skipped jobs are not failures, but every non-skipped check must conclude successfully. The core validation workflow runs on:
 
 - Pull requests targeting `main` (pre-merge gate)
 - Pushes to `main` (post-merge validation)
@@ -286,29 +293,11 @@ npx playwright test ios-safari.spec.ts        # Run specific test file
 npx playwright test android-chrome.spec.ts    # Run Android test file
 ```
 
-### CI tiers (two-tier E2E model)
+### Hosted fork CI and upstream-only E2E
 
-E2E coverage in CI has three layers (spike #1994):
+The GitHub-hosted Chromium smoke in the `validate` job runs on every PR and is part of the fork's merge gate. Hosted API, accessibility, and visual jobs add their respective coverage without requiring private infrastructure.
 
-| Tier | Runner | Browsers | When | Approval |
-| --- | --- | --- | --- | --- |
-| Baseline | `ubuntu-latest` | chromium smoke | Every PR (`validate` job) | None |
-| Trusted | `ci-runner` | full suite | Main-repo PRs (auto) | None |
-| Approval | `ci-runner` | full suite | Fork PRs | `ggfevans` gate |
-
-The baseline chromium smoke runs on GitHub-hosted runners for all PRs. The `e2e-self-hosted` job runs the full browser suite on the self-hosted `ci-runner` only after the baseline passes (`needs: validate`). The job selects its environment from the PR source:
-
-```yaml
-environment: ${{ github.event.pull_request.head.repo.full_name == 'RackulaLives/Rackula' && 'e2e-trusted' || 'e2e-approval' }}
-```
-
-PRs from a branch in `RackulaLives/Rackula` resolve to `e2e-trusted` and run without delay. Fork PRs (including forks owned by org members) resolve to `e2e-approval`, which pauses until `ggfevans` reviews the diff and approves. This keeps untrusted code off the homelab runner without an explicit human OK.
-
-Maintainer prerequisites (one-time, in repo settings):
-
-- GitHub Environment `e2e-trusted`: no required reviewers and no deployment branch policy. Org PRs run from feature branches (and `pull_request` refs are not branch names), so restricting this environment to `main` would block the trusted tier for every PR.
-- GitHub Environment `e2e-approval`: `ggfevans` as the required reviewer, no branch restriction (fork PRs run from arbitrary branches).
-- Self-hosted runner online advertising the `ci-runner` label.
+The `e2e-self-hosted` job is intentionally restricted to `RackulaLives/Rackula`. This fork has no upstream homelab runner or approval environments, so that job is skipped here and is not a pending fork gate. For cross-cutting UI changes, run the full browser suite locally and record the result in the PR in addition to the hosted checks.
 
 ### iOS Safari Testing
 

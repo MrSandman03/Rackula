@@ -372,24 +372,22 @@ Follow TDD skill exactly for each acceptance criterion. Mark complete in progres
 
 If failures: see Error Recovery section.
 
-### 3e. Independent Code Review (MANDATORY)
+### 3e. Pre-Commit Diff Check
 
-Run `/code-review` on the complete committed diff before pushing. If that command is unavailable, dispatch a read-only reviewer against the full diff. If no independent reviewer is available, stop and ask the user.
+Review the working diff against the issue acceptance criteria and repository rules before committing. Fix findings and re-run affected verification. This does not replace the exact-head independent review.
 
-Address actionable findings in follow-up commits. Document why any rejected finding is incorrect or out of scope, then re-run affected verification. Use at least two independent reviewers for high-risk or cross-cutting changes.
+### 3f. Commit, Exact-Head Review, and Push
 
-Only proceed to push after all findings are resolved or explicitly rebutted.
+Commit with conventional format: `<type>: <description>` with `Fixes #<number>` in the body. Record `git rev-parse HEAD`, then dispatch a reviewer who did not implement the change to review the complete base-to-HEAD diff. If no independent reviewer is available, stop and ask the user. Use at least two reviewers for high-risk or cross-cutting changes.
 
-### 3f. Commit and Push
-
-Commit with conventional format: `<type>: <description>` with `Fixes #<number>` in body. Push to origin with `-u` flag.
+Address findings in follow-up commits, re-run affected verification, and repeat review against the new HEAD. Push with `-u` only after the exact commit has a PASS verdict and every finding is resolved or explicitly rebutted.
 
 ### 3g. Create PR
 
-Use `gh pr create` with:
+Use `gh pr create --draft` with:
 
 - Title: `<type>: <description> (#<number>)`
-- Body: Summary bullets, files changed, test plan checklist, `Closes #<number>`
+- Body: Summary bullets, files changed, test plan checklist, review evidence (exact SHA, independent reviewer, verdict), and `Closes #<number>`
 
 ### 3h. Merge
 

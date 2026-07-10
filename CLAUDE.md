@@ -128,7 +128,7 @@ Every pull request must pass the repository's local verification commands and al
 
 Resolve or explicitly rebut every actionable finding and re-run affected verification after fixes. Use at least two independent reviewers for cross-cutting, compatibility, security-sensitive, or otherwise high-risk changes. Any subsequent commit invalidates the prior review verdict and human approval.
 
-Third-party AI review apps and CLIs are not part of this fork's workflow. Do not install or invoke them as review or merge gates.
+Repository-installed external review apps and vendor-specific review CLIs are not used as merge gates in this fork. Do not install or invoke them for that purpose. Optional review workflows may provide non-gating signal, but they do not replace the exact-head independent review.
 
 ### PR Workflow
 

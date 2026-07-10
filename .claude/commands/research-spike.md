@@ -495,9 +495,28 @@ Files:
 Created <X> implementation issues.
 
 Closes #<N>"
+```
 
+Record `git rev-parse HEAD`, then dispatch an independent reviewer against the complete base-to-HEAD diff. Fix findings in new commits, re-run affected verification, and repeat review on the new HEAD. Only continue after an exact-head PASS verdict.
+
+```bash
 git push -u origin spike/<N>-research
-gh pr create --title "docs: spike #<N> research" --body "..."
+gh pr create --draft \
+  --title "docs: spike #<N> research" \
+  --body "## Summary
+<research summary>
+
+## Test Plan
+- [ ] Documentation links and generated issues verified
+
+## Review Evidence
+- Reviewed commit: <full SHA>
+- Independent reviewer: <name or agent>
+- Verdict: PASS
+- [ ] All applicable GitHub checks pass on the reviewed commit
+- [ ] No commits were added after the recorded review
+
+Closes #<N>"
 ```
 
 ### 5b. Close Spike Issue
