@@ -14,7 +14,7 @@ import {
   getSlotFitIssues,
   validateSlotTopology,
 } from "$lib/utils/slot-fit";
-import { DeviceTypeSchema } from "$lib/schemas";
+import { DeviceTypeSchema, LayoutSchema } from "$lib/schemas";
 
 interface Sidecar {
   reject?: boolean;
@@ -239,5 +239,11 @@ describe("upgrade corpus: explicit row-height overflow", () => {
       ]),
     );
     expect(DeviceTypeSchema.safeParse(containerType).success).toBe(false);
+  });
+
+  it("is rejected by the current layout authoring schema", async () => {
+    const parsed = await parseYaml(explicitRowHeightOverflowYaml);
+
+    expect(LayoutSchema.safeParse(parsed).success).toBe(false);
   });
 });

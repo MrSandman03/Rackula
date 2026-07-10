@@ -54,7 +54,7 @@ function createBayRackFromSource(source: Rack, name: string, id: string): Rack {
 
   // Named profiles own their dimensions. Generic racks retain a deliberately
   // configured depth instead of reverting to the factory's 1000mm default.
-  if (!source.profile && source.depth_mm !== undefined) {
+  if (source.profile !== "rackmate-t1-plus" && source.depth_mm !== undefined) {
     rack.depth_mm = source.depth_mm;
   }
   return rack;

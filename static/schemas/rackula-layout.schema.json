@@ -819,7 +819,10 @@
           "type": "integer"
         },
         "profile": {
-          "const": "rackmate-t1-plus",
+          "enum": [
+            "generic",
+            "rackmate-t1-plus"
+          ],
           "type": "string"
         },
         "show_rear": {
@@ -1120,7 +1123,10 @@
             "type": "integer"
           },
           "profile": {
-            "const": "rackmate-t1-plus",
+            "enum": [
+              "generic",
+              "rackmate-t1-plus"
+            ],
             "type": "string"
           },
           "show_rear": {

@@ -19,7 +19,10 @@ import {
   allowsFractionalRailPosition,
   requiresCarrier,
 } from "$lib/utils/carrier-rules";
-import { withRackProfileDefaults } from "$lib/utils/rack-profile";
+import {
+  withLegacyRackProfileDefaults,
+  withRackProfileDefaults,
+} from "$lib/utils/rack-profile";
 import {
   effectiveSlotHeightUnits,
   getDeviceDimensionsMm,
@@ -27,10 +30,7 @@ import {
   SLOT_DIMENSION_TOLERANCE_MM,
   validateSlotTopology,
 } from "$lib/utils/slot-fit";
-import {
-  findBuiltInDeviceType,
-  hydrateBuiltInDeviceType,
-} from "$lib/utils/built-in-device";
+import { findBuiltInDeviceType } from "$lib/utils/built-in-device";
 import { isDeviceCompatibleWithRackWidth } from "$lib/utils/rack-width";
 import type { DeviceType, Slot } from "$lib/types";
 
@@ -634,7 +634,7 @@ export const DeviceTypeSchema = DeviceTypeSchemaBase.superRefine((data, ctx) =>
  * Saved layouts predate slot-row height accounting. Keep only that historical
  * load exception here so the canonical DeviceTypeSchema stays strict.
  */
-const SavedLayoutDeviceTypeSchema = DeviceTypeSchemaBase.superRefine(
+const LegacySavedDeviceTypeSchema = DeviceTypeSchemaBase.superRefine(
   (data, ctx) => addDeviceTypeRefinementIssues(data, ctx, true),
 );
 
@@ -741,7 +741,7 @@ const RackSchemaInput = z
       z.literal(21),
       z.literal(23),
     ]),
-    profile: z.literal("rackmate-t1-plus").optional(),
+    profile: z.enum(["generic", "rackmate-t1-plus"]).optional(),
     desc_units: z.boolean(),
     show_rear: z.boolean().default(true),
     form_factor: FormFactorSchema,
@@ -780,7 +780,7 @@ export const RackSchema = z
       z.literal(21),
       z.literal(23),
     ]),
-    profile: z.literal("rackmate-t1-plus").optional(),
+    profile: z.enum(["generic", "rackmate-t1-plus"]).optional(),
     desc_units: z.boolean(),
     show_rear: z.boolean().default(true),
     form_factor: FormFactorSchema,
@@ -881,13 +881,18 @@ const LayoutSchemaInput = z
     // Legacy format: single rack (optional, converted by transform)
     rack: RackSchemaInput.optional(),
     rack_groups: z.array(RackGroupSchema).optional(),
-    device_types: z.array(SavedLayoutDeviceTypeSchema),
+    device_types: z.array(DeviceTypeSchema),
     settings: LayoutSettingsSchema,
     connections: z.array(ConnectionSchema).optional(),
     /** @deprecated Use connections instead */
     cables: z.array(CableSchema).optional(),
   })
   .passthrough();
+
+/** Prior-release file/object ingestion with its narrow slot-topology waiver. */
+const LegacySavedLayoutSchemaInput = LayoutSchemaInput.extend({
+  device_types: z.array(LegacySavedDeviceTypeSchema),
+});
 
 /**
  * Complete layout schema (base, with migration transform)
@@ -897,7 +902,10 @@ const LayoutSchemaInput = z
  * - Generating nanoid for racks missing id field
  * - Position migration from U values to internal units (v0.7.0)
  */
-export const LayoutSchemaBase = LayoutSchemaInput.transform((data) => {
+function transformLayoutSchemaInput(
+  data: z.infer<typeof LegacySavedLayoutSchemaInput>,
+  allowLegacyProfileInference: boolean,
+) {
   // Determine the racks array
   let racks: z.infer<typeof RackSchemaInput>[];
 
@@ -912,12 +920,11 @@ export const LayoutSchemaBase = LayoutSchemaInput.transform((data) => {
     racks = [];
   }
 
-  // Compact/share payloads may omit built-ins entirely or embed only their
-  // display fields. Restore canonical fit constraints before migration and
-  // return the hydrated definitions so every downstream consumer sees the
-  // same validation-critical data.
-  const deviceTypes = data.device_types.map((deviceType) =>
-    hydrateBuiltInDeviceType(deviceType),
+  // An explicit saved definition is authoritative, even when its slug shadows
+  // a built-in. Add canonical definitions only for referenced built-in slugs
+  // that are genuinely absent from the document.
+  const deviceTypes: DeviceType[] = data.device_types.map(
+    (deviceType) => ({ ...deviceType }) as DeviceType,
   );
   const knownDeviceTypes = new Set(
     deviceTypes.map((deviceType) => deviceType.slug),
@@ -970,10 +977,15 @@ export const LayoutSchemaBase = LayoutSchemaInput.transform((data) => {
       ? migrateDevicePositions(deduplicatedDevices)
       : deduplicatedDevices;
 
-    const rackWithProfileDefaults = withRackProfileDefaults({
-      ...rack,
-      id: rack.id ?? nanoid(),
-    });
+    const rackWithProfileDefaults = allowLegacyProfileInference
+      ? withLegacyRackProfileDefaults({
+          ...rack,
+          id: rack.id ?? nanoid(),
+        })
+      : withRackProfileDefaults({
+          ...rack,
+          id: rack.id ?? nanoid(),
+        });
     const hasFixedRackProfile =
       rackWithProfileDefaults.profile === "rackmate-t1-plus";
 
@@ -1006,12 +1018,30 @@ export const LayoutSchemaBase = LayoutSchemaInput.transform((data) => {
     racks: racksWithIds,
     device_types: deviceTypes,
   };
-});
+}
 
-/**
- * Complete layout schema with slug uniqueness and referential integrity validation
- */
-export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
+/** Strict current authoring and validation boundary. */
+export const LayoutSchemaBase = LayoutSchemaInput.transform((data) =>
+  transformLayoutSchemaInput(data, false),
+);
+
+/** Structural migration boundary for prior-release saved files and objects. */
+export const LegacySavedLayoutSchemaBase =
+  LegacySavedLayoutSchemaInput.transform((data) =>
+    transformLayoutSchemaInput(data, true),
+  );
+
+/** Legacy compact shares need saved-data waivers, but infer profiles explicitly. */
+export const LegacyShareLayoutSchemaBase =
+  LegacySavedLayoutSchemaInput.transform((data) =>
+    transformLayoutSchemaInput(data, false),
+  );
+
+function addLayoutRefinementIssues(
+  data: z.infer<typeof LayoutSchemaBase>,
+  ctx: RefinementCtx,
+  allowPriorReleaseSlotFit: boolean,
+): void {
   // Validate at least one rack is present
   if (!data.racks || data.racks.length === 0) {
     ctx.addIssue({
@@ -1095,12 +1125,8 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
   const deviceTypeBySlug = new Map(
     data.device_types.map((dt) => [dt.slug, dt]),
   );
-  const resolveDeviceType = (slug: string) => {
-    const embedded = deviceTypeBySlug.get(slug);
-    return embedded
-      ? hydrateBuiltInDeviceType(embedded)
-      : findBuiltInDeviceType(slug);
-  };
+  const resolveDeviceType = (slug: string) =>
+    deviceTypeBySlug.get(slug) ?? findBuiltInDeviceType(slug);
 
   // Check each rack's devices for container relationships
   for (let rackIndex = 0; rackIndex < data.racks.length; rackIndex++) {
@@ -1117,6 +1143,17 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
       deviceIndex++
     ) {
       const device = rack.devices[deviceIndex]!;
+      const placedType = resolveDeviceType(device.device_type);
+      if (!placedType) {
+        if (!allowPriorReleaseSlotFit) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Device "${device.name ?? device.id}" has no device type definition for "${device.device_type}".`,
+            path: ["racks", rackIndex, "devices", deviceIndex, "device_type"],
+          });
+        }
+        continue;
+      }
 
       // === Carrier-first rail enforcement (rack-level devices, #2158/C4) ===
       // A device that registers directly to the rails must mount at a whole-U
@@ -1124,7 +1161,7 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
       // non-integer-height, or half-width gear must sit inside a carrier. Blank
       // filler panels are exempt: a blank may rail-mount at any height.
       if (!device.container_id) {
-        const railType = resolveDeviceType(device.device_type);
+        const railType = placedType;
         const canUseFractionalRail =
           railType &&
           allowsFractionalRailPosition(railType, rack.width) &&
@@ -1207,9 +1244,13 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
 
         // 3b. Child must fit its cell (height_units / width_fraction).
         const slot = slotById.get(device.slot_id)!;
-        const slotForLayoutValidation =
-          slotForPriorReleaseOmittedHeightLayoutValidation(slot, containerType);
-        const childForFit = resolveDeviceType(device.device_type);
+        const slotForLayoutValidation = allowPriorReleaseSlotFit
+          ? slotForPriorReleaseOmittedHeightLayoutValidation(
+              slot,
+              containerType,
+            )
+          : slot;
+        const childForFit = placedType;
         if (childForFit) {
           if (!isDeviceCompatibleWithRackWidth(childForFit, rack.width)) {
             ctx.addIssue({
@@ -1250,7 +1291,7 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
       }
 
       // 4. Validate no nested containers (single-level nesting only)
-      const childType = resolveDeviceType(device.device_type);
+      const childType = placedType;
       if (childType && childType.slots && childType.slots.length > 0) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -1350,7 +1391,21 @@ export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) => {
       }
     }
   }
-});
+}
+
+/** Complete strict layout schema for current authoring and untrusted shares. */
+export const LayoutSchema = LayoutSchemaBase.superRefine((data, ctx) =>
+  addLayoutRefinementIssues(data, ctx, false),
+);
+
+/** Complete prior-release ingestion schema with narrow compatibility waivers. */
+export const LegacySavedLayoutSchema = LegacySavedLayoutSchemaBase.superRefine(
+  (data, ctx) => addLayoutRefinementIssues(data, ctx, true),
+);
+
+export const LegacyShareLayoutSchema = LegacyShareLayoutSchemaBase.superRefine(
+  (data, ctx) => addLayoutRefinementIssues(data, ctx, true),
+);
 
 // ============================================================================
 // Type Exports (inferred from schemas)

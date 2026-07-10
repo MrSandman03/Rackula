@@ -140,7 +140,7 @@
       deviceQuery,
       activeRackWidth,
       uiStore.compatibleOnly,
-    ),
+    ).filter((device) => !uiStore.compatibleOnly || deviceIsCompatible(device)),
   );
   const commandDeviceLibrary = $derived([
     ...deviceSources.starter,
@@ -159,15 +159,24 @@
       activeRackWidth,
       commandDeviceLibrary,
       layoutStore.activeRack?.profile,
+      layoutStore.activeRack?.depth_mm,
+      layoutStore.activeRack?.height,
     );
   }
 
   function deviceIsCompatible(device: DeviceType): boolean {
-    return isDeviceCompatibleWithRackWidth(device, activeRackWidth);
+    return (
+      isDeviceCompatibleWithRackWidth(device, activeRackWidth) &&
+      deviceFitSummary(device)?.tone !== "blocked"
+    );
   }
 
   function deviceIncompatibilityReason(device: DeviceType): string | null {
-    return getRackWidthIncompatibilityReason(device, activeRackWidth);
+    if (!isDeviceCompatibleWithRackWidth(device, activeRackWidth)) {
+      return getRackWidthIncompatibilityReason(device, activeRackWidth);
+    }
+    const summary = deviceFitSummary(device);
+    return summary?.tone === "blocked" ? summary.title : null;
   }
 
   function resetState() {
@@ -403,7 +412,9 @@
                             <span
                               class="command-item-reason"
                               title={incompatibilityReason ?? undefined}
-                              >Width</span
+                              >{fitSummary?.tone === "blocked"
+                                ? fitSummary.label
+                                : "Width"}</span
                             >
                           {:else if fitSummary}
                             <span

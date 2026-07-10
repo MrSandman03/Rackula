@@ -134,4 +134,96 @@ describe("Rack fit summaries", () => {
     expect(getRackFitSummary(malformed, 10)).toBeNull();
     expect(getRackFitSummary(withRackulaFit("not-an-object"), 10)).toBeNull();
   });
+
+  it("honours the physical-width tolerance used by placement", () => {
+    const withinTolerance = withRackulaFit({
+      dimensions_mm: { width: 254.5 },
+    });
+    const overTolerance = withRackulaFit({
+      dimensions_mm: { width: 254.51 },
+    });
+
+    expect(getRackFitSummary(withinTolerance, 10)).toBeNull();
+    expect(getRackFitSummary(overTolerance, 10)).toMatchObject({
+      label: "Wide",
+      tone: "blocked",
+    });
+  });
+
+  it("does not call a recommended mount fitting when the mount misses the rack envelope", () => {
+    const child = withRackulaFit(
+      { recommended_mount_slugs: ["recommended-tray"] },
+      {
+        slug: "tray-only-child",
+        subdevice_role: "child",
+        slot_width: 1,
+        custom_fields: {
+          rackula_fit: {
+            recommended_mount_slugs: ["recommended-tray"],
+            dimensions_mm: { depth: 200 },
+          },
+        },
+      },
+    );
+    const tray = withRackulaFit(
+      { dimensions_mm: { depth: 300 } },
+      {
+        slug: "recommended-tray",
+        model: "Recommended Tray",
+        category: "shelf",
+        rack_widths: [19],
+        slots: [
+          {
+            id: "main",
+            position: { row: 0, col: 0 },
+            width_fraction: 1,
+            height_units: 1,
+          },
+        ],
+      },
+    );
+
+    expect(
+      getRackFitSummary(child, 10, [tray], "rackmate-t1-plus", 260),
+    ).toMatchObject({
+      label: "No bay",
+      tone: "blocked",
+    });
+  });
+
+  it("blocks devices and required mounts taller than the rack", () => {
+    const direct = withRackulaFit({}, { slug: "tall-device", u_height: 12 });
+    const child = withRackulaFit(
+      { recommended_mount_slugs: ["tall-tray"] },
+      {
+        slug: "mounted-child",
+        subdevice_role: "child",
+        slot_width: 1,
+      },
+    );
+    const tallTray = withRackulaFit(
+      {},
+      {
+        slug: "tall-tray",
+        category: "shelf",
+        u_height: 9,
+        slots: [
+          {
+            id: "main",
+            position: { row: 0, col: 0 },
+            width_fraction: 1,
+            height_units: 9,
+          },
+        ],
+      },
+    );
+
+    expect(getRackFitSummary(direct, 10, [], undefined, 260, 8)).toMatchObject({
+      label: "Tall",
+      tone: "blocked",
+    });
+    expect(
+      getRackFitSummary(child, 10, [tallTray], undefined, 260, 8),
+    ).toMatchObject({ label: "No bay", tone: "blocked" });
+  });
 });

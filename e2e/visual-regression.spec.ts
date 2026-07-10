@@ -163,6 +163,7 @@ test.describe("visual regression", () => {
     await runPaletteCommand(page, "share");
     const dialog = page.locator(locators.dialog.root);
     await expect(dialog).toBeVisible();
+    await expect(page.getByTestId("share-url-input")).not.toHaveValue("");
     await settle(page);
     // The share URL and its QR code encode the layout and app version, so both
     // change between builds: mask them.

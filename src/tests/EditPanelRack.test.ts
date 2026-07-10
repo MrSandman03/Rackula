@@ -6,6 +6,7 @@ import { resetHistoryStore } from "$lib/stores/history.svelte";
 import { resetLayoutStore } from "$lib/stores/layout.svelte";
 import { resetSelectionStore } from "$lib/stores/selection.svelte";
 import { getLayoutStore } from "$lib/stores/layout.svelte";
+import { parseLayoutObject } from "$lib/utils/yaml";
 import {
   createTestDevice,
   createTestDeviceType,
@@ -56,6 +57,48 @@ describe("EditPanelRack RackMate presets", () => {
     expect(screen.getByLabelText("Depth (mm)")).not.toHaveAttribute("readonly");
   });
 
+  it("keeps an already-active 10-inch width generic when clicked", async () => {
+    const user = userEvent.setup();
+    const layoutStore = getLayoutStore();
+    const rack = createTestRack({ height: 12, width: 10, depth_mm: 400 });
+    layoutStore.loadLayout(createTestLayout({ racks: [rack] }));
+
+    render(EditPanelRack, {
+      props: { selectedRack: layoutStore.racks[0]!, selectedGroup: null },
+    });
+    await user.click(screen.getByRole("button", { name: '10"' }));
+
+    expect(layoutStore.racks[0]).toMatchObject({
+      width: 10,
+      height: 12,
+      depth_mm: 400,
+    });
+    expect(layoutStore.racks[0]?.profile).toBeUndefined();
+    expect(layoutStore.canUndo).toBe(false);
+  });
+
+  it("records Generic when an unmarked rack matches the legacy RackMate tuple", async () => {
+    const user = userEvent.setup();
+    const layoutStore = getLayoutStore();
+    const updateRack = vi.spyOn(layoutStore, "updateRack");
+    const rack = createTestRack({
+      name: "RackMate T1 Plus",
+      height: 8,
+      width: 10,
+      depth_mm: 260,
+      profile: undefined,
+    });
+
+    render(EditPanelRack, {
+      props: { selectedRack: rack, selectedGroup: null },
+    });
+    await user.click(screen.getByRole("button", { name: "Generic" }));
+
+    expect(updateRack).toHaveBeenLastCalledWith(rack.id, {
+      profile: "generic",
+    });
+  });
+
   it("keeps standard rack heights and depths for 19-inch racks", () => {
     const rack = createTestRack({ height: 42, width: 19 });
 
@@ -70,7 +113,7 @@ describe("EditPanelRack RackMate presets", () => {
     expect(screen.queryByTestId("btn-preset-depth-260")).toBeNull();
   });
 
-  it("assigns and clears the RackMate profile when width presets change", async () => {
+  it("keeps the 10-inch width generic until RackMate is explicitly selected", async () => {
     const user = userEvent.setup();
     const layoutStore = getLayoutStore();
     const updateRack = vi.spyOn(layoutStore, "updateRack");
@@ -83,9 +126,15 @@ describe("EditPanelRack RackMate presets", () => {
 
     expect(updateRack).toHaveBeenLastCalledWith(rack.id, {
       width: 10,
-      profile: "rackmate-t1-plus",
+    });
+
+    await user.click(screen.getByRole("button", { name: "RackMate T1 Plus" }));
+
+    expect(updateRack).toHaveBeenLastCalledWith(rack.id, {
+      width: 10,
       height: 8,
       depth_mm: 260,
+      profile: "rackmate-t1-plus",
     });
 
     view.unmount();
@@ -99,11 +148,44 @@ describe("EditPanelRack RackMate presets", () => {
     render(EditPanelRack, {
       props: { selectedRack: rackMate, selectedGroup: null },
     });
-    await user.click(screen.getByRole("button", { name: '19"' }));
+    await user.click(screen.getByRole("button", { name: "Generic" }));
 
     expect(updateRack).toHaveBeenLastCalledWith(rackMate.id, {
-      width: 19,
-      profile: undefined,
+      profile: "generic",
+    });
+  });
+
+  it("keeps an explicit Generic opt-out after persisted-layout validation", async () => {
+    const user = userEvent.setup();
+    const layoutStore = getLayoutStore();
+    const rackMate = createTestRack({
+      name: "RackMate T1 Plus",
+      height: 8,
+      width: 10,
+      depth_mm: 260,
+      profile: "rackmate-t1-plus",
+    });
+    layoutStore.loadLayout(createTestLayout({ racks: [rackMate] }));
+
+    render(EditPanelRack, {
+      props: { selectedRack: layoutStore.racks[0]!, selectedGroup: null },
+    });
+    await user.click(screen.getByRole("button", { name: "Generic" }));
+
+    const persisted = parseLayoutObject(
+      JSON.parse(JSON.stringify(layoutStore.layout)),
+    );
+    expect(persisted?.racks[0]).toMatchObject({
+      name: "RackMate T1 Plus",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+      profile: "generic",
+    });
+    expect(layoutStore.undo()).toBe(true);
+    expect(layoutStore.racks[0]).toMatchObject({
+      name: "RackMate T1 Plus",
+      profile: "rackmate-t1-plus",
     });
   });
 
@@ -116,7 +198,7 @@ describe("EditPanelRack RackMate presets", () => {
     render(EditPanelRack, {
       props: { selectedRack: layoutStore.racks[0]!, selectedGroup: null },
     });
-    await user.click(screen.getByRole("button", { name: '10"' }));
+    await user.click(screen.getByRole("button", { name: "RackMate T1 Plus" }));
 
     expect(layoutStore.racks[0]).toMatchObject({
       width: 10,
@@ -157,7 +239,7 @@ describe("EditPanelRack RackMate presets", () => {
     render(EditPanelRack, {
       props: { selectedRack: layoutStore.racks[0]!, selectedGroup: null },
     });
-    await user.click(screen.getByRole("button", { name: '10"' }));
+    await user.click(screen.getByRole("button", { name: "RackMate T1 Plus" }));
 
     expect(layoutStore.racks[0]).toMatchObject({
       width: 19,
@@ -169,6 +251,75 @@ describe("EditPanelRack RackMate presets", () => {
       screen.getByText(/RackMate T1 Plus cannot contain Full Width Switch/),
     ).toBeInTheDocument();
     expect(layoutStore.undo()).toBe(false);
+  });
+
+  it("blocks a generic width shrink when installed hardware is 19-inch only", async () => {
+    const user = userEvent.setup();
+    const layoutStore = getLayoutStore();
+    const deviceType = createTestDeviceType({
+      slug: "generic-full-width-switch",
+      model: "Generic Full Width Switch",
+      rack_widths: [19],
+    });
+    const rack = createTestRack({
+      width: 19,
+      devices: [createTestDevice({ device_type: deviceType.slug })],
+    });
+    layoutStore.loadLayout(
+      createTestLayout({ racks: [rack], device_types: [deviceType] }),
+    );
+
+    render(EditPanelRack, {
+      props: { selectedRack: layoutStore.racks[0]!, selectedGroup: null },
+    });
+    await user.click(screen.getByRole("button", { name: '10"' }));
+
+    expect(layoutStore.racks[0]?.width).toBe(19);
+    expect(
+      screen.getByText(
+        /10-inch rails cannot contain Generic Full Width Switch/,
+      ),
+    ).toBeInTheDocument();
+    expect(layoutStore.canUndo).toBe(false);
+  });
+
+  it("keeps a width-based RackMate exit generic after returning to 10 inches", async () => {
+    const user = userEvent.setup();
+    const layoutStore = getLayoutStore();
+    const rack = createTestRack({
+      name: "RackMate T1 Plus",
+      height: 8,
+      width: 10,
+      depth_mm: 260,
+      profile: "rackmate-t1-plus",
+    });
+    layoutStore.loadLayout(createTestLayout({ racks: [rack] }));
+
+    render(EditPanelRack, {
+      props: { selectedRack: layoutStore.racks[0]!, selectedGroup: null },
+    });
+    await user.click(screen.getByRole("button", { name: '19"' }));
+
+    expect(layoutStore.racks[0]).toMatchObject({
+      name: "RackMate T1 Plus",
+      width: 19,
+      profile: "generic",
+    });
+
+    expect(layoutStore.undo()).toBe(true);
+    expect(layoutStore.racks[0]).toMatchObject({
+      name: "RackMate T1 Plus",
+      width: 10,
+      profile: "rackmate-t1-plus",
+    });
+    expect(layoutStore.redo()).toBe(true);
+
+    layoutStore.updateRack(rack.id, { width: 10 });
+    const persisted = parseLayoutObject(
+      JSON.parse(JSON.stringify(layoutStore.layout)),
+    );
+    expect(persisted?.racks[0]?.width).toBe(10);
+    expect(persisted?.racks[0]?.profile).toBe("generic");
   });
 
   it("rejects an individual RackMate conversion in a bayed group without local drift", async () => {
@@ -185,13 +336,35 @@ describe("EditPanelRack RackMate presets", () => {
     render(EditPanelRack, {
       props: { selectedRack: rack, selectedGroup: group },
     });
-    await user.click(screen.getByRole("button", { name: '10"' }));
+    await user.click(screen.getByRole("button", { name: "RackMate T1 Plus" }));
 
     expect(updateRack).not.toHaveBeenCalled();
     expect(screen.getByLabelText("Depth (mm)")).toHaveValue(1000);
     expect(screen.getByLabelText("Height")).toHaveValue(42);
     expect(
       screen.getByText(/Bayed rack profiles must be changed as a group/),
+    ).toBeInTheDocument();
+  });
+
+  it("rejects a per-member width change in a generic bayed group", async () => {
+    const user = userEvent.setup();
+    const layoutStore = getLayoutStore();
+    const updateRack = vi.spyOn(layoutStore, "updateRack");
+    const rack = createTestRack({ height: 12, width: 19, depth_mm: 600 });
+    const group = {
+      id: "group-1",
+      rack_ids: [rack.id, "rack-2"],
+      layout_preset: "bayed" as const,
+    };
+
+    render(EditPanelRack, {
+      props: { selectedRack: rack, selectedGroup: group },
+    });
+    await user.click(screen.getByRole("button", { name: '10"' }));
+
+    expect(updateRack).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(/Bayed rack widths must be changed as a group/),
     ).toBeInTheDocument();
   });
 
@@ -211,7 +384,7 @@ describe("EditPanelRack RackMate presets", () => {
     render(EditPanelRack, {
       props: { selectedRack: layoutStore.racks[0]!, selectedGroup: null },
     });
-    await user.click(screen.getByRole("button", { name: '10"' }));
+    await user.click(screen.getByRole("button", { name: "RackMate T1 Plus" }));
 
     expect(layoutStore.undoDescription).toBe(undoDescription);
     expect(layoutStore.undo()).toBe(true);

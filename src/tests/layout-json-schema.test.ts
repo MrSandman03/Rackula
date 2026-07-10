@@ -35,9 +35,12 @@ function findRackMateRackSchemas(value: unknown): Record<string, unknown>[] {
   const schema = value as Record<string, unknown>;
   const properties = schema.properties as Record<string, unknown> | undefined;
   const profile = properties?.profile as Record<string, unknown> | undefined;
+  const profileValues = Array.isArray(profile?.enum)
+    ? profile.enum
+    : [profile?.const];
   const matchesRackShape =
     schema.type === "object" &&
-    profile?.const === "rackmate-t1-plus" &&
+    profileValues.includes("rackmate-t1-plus") &&
     properties?.height !== undefined &&
     properties?.width !== undefined &&
     properties?.depth_mm !== undefined;
@@ -78,6 +81,12 @@ describe("layout JSON Schema artifact", () => {
     // eslint-disable-next-line no-restricted-syntax
     expect(rackSchemas).toHaveLength(2);
     for (const rackSchema of rackSchemas) {
+      expect(
+        (rackSchema.properties as Record<string, unknown>).profile,
+      ).toEqual({
+        enum: ["generic", "rackmate-t1-plus"],
+        type: "string",
+      });
       expect(rackSchema.allOf).toContainEqual({
         if: {
           properties: {

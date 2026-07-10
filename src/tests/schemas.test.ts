@@ -18,6 +18,7 @@ import {
   RackGroupSchema,
   LayoutSettingsSchema,
   LayoutSchema,
+  LegacySavedLayoutSchema,
   validateSlugUniqueness,
   SlotSchema,
   SlotPosition2DSchema,
@@ -980,6 +981,64 @@ describe("LayoutSchema", () => {
     it("allows empty device_types", () => {
       const layout = { ...validLayout, device_types: [] };
       expect(LayoutSchema.safeParse(layout).success).toBe(true);
+    });
+  });
+
+  describe("device type referential integrity", () => {
+    it("rejects a placed device with no embedded or built-in definition", () => {
+      const layout = {
+        ...validLayout,
+        version: "1.0.0",
+        racks: [
+          {
+            ...validLayout.racks[0],
+            devices: [
+              {
+                id: "unknown-device-1",
+                device_type: "not-registered-anywhere",
+                position: 6,
+                face: "front" as const,
+              },
+            ],
+          },
+        ],
+      };
+
+      const result = LayoutSchema.safeParse(layout);
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              path: ["racks", 0, "devices", 0, "device_type"],
+              message: expect.stringContaining("no device type definition"),
+            }),
+          ]),
+        );
+      }
+    });
+
+    it("preserves an unknown placed type only at the prior-release boundary", () => {
+      const layout = {
+        ...validLayout,
+        racks: [
+          {
+            ...validLayout.racks[0],
+            devices: [
+              {
+                id: "legacy-unknown-device",
+                device_type: "not-registered-anywhere",
+                position: 6,
+                face: "front" as const,
+              },
+            ],
+          },
+        ],
+      };
+
+      expect(LegacySavedLayoutSchema.safeParse(layout).success).toBe(true);
+      expect(LayoutSchema.safeParse(layout).success).toBe(false);
     });
   });
 
@@ -2493,6 +2552,23 @@ describe("LayoutSchema container validation", () => {
 // ============================================================================
 
 describe("LayoutSchema position migration", () => {
+  const migrationDeviceTypes = [
+    createTestDeviceType({ slug: "server" }),
+    createTestContainerType({
+      slug: "chassis",
+      u_height: 2,
+      slots: [
+        createTestSlot({
+          id: "slot-1",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 2,
+        }),
+      ],
+    }),
+    createTestDeviceType({ slug: "blade", u_height: 1 }),
+  ];
+
   // Helper to create migration test layouts using shared factories
   const createMigrationTestLayout = (version: string, devices: unknown[]) => ({
     version,
@@ -2503,7 +2579,7 @@ describe("LayoutSchema position migration", () => {
         devices: devices as Parameters<typeof createTestRack>[0]["devices"],
       }),
     ],
-    device_types: [],
+    device_types: migrationDeviceTypes,
     settings: createTestLayoutSettings({ show_labels_on_images: true }),
   });
 
@@ -2549,7 +2625,7 @@ describe("LayoutSchema position migration", () => {
             ],
           }),
         ],
-        device_types: [],
+        device_types: migrationDeviceTypes,
         settings: createTestLayoutSettings({ show_labels_on_images: true }),
       };
 

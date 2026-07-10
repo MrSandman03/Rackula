@@ -513,10 +513,12 @@ export function updateRackRaw(
   if (!target) return;
   const constrainedUpdates = constrainRackProfileUpdates(target.rack, updates);
 
-  updateRackAtIndex(ctx, target.index, (rack) => ({
-    ...rack,
-    ...constrainedUpdates,
-  }));
+  updateRackAtIndex(ctx, target.index, (rack) =>
+    withRackProfileDefaults({
+      ...rack,
+      ...constrainedUpdates,
+    }),
+  );
 }
 
 /**

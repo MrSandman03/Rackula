@@ -8,9 +8,11 @@
  */
 
 import type { Layout, LayoutMetadata } from "$lib/types";
+import { withCurrentRackProfileMarker } from "$lib/utils/rack-profile";
 import {
   LayoutSchema,
-  LayoutSchemaBase,
+  LegacySavedLayoutSchema,
+  LegacySavedLayoutSchemaBase,
   assertSchemaVersionSupported,
   type LayoutZod,
 } from "$lib/schemas";
@@ -36,6 +38,13 @@ function warnDuplicateDeviceIds(layout: Layout): void {
       );
     }
   }
+}
+
+function withCurrentRackProfileMarkers(layout: Layout): Layout {
+  return {
+    ...layout,
+    racks: layout.racks.map((rack) => withCurrentRackProfileMarker(rack)),
+  };
 }
 
 const STANDARD_RACK_WIDTH = 19;
@@ -112,7 +121,8 @@ export async function serializeLayoutToYaml(
         }
       : undefined;
 
-  const layoutForSerialization = orderLayoutFields(layout, {
+  const currentLayout = withCurrentRackProfileMarkers(layout);
+  const layoutForSerialization = orderLayoutFields(currentLayout, {
     metadata,
     images: encodedImages,
   });
@@ -150,7 +160,10 @@ export async function serializeLayoutToYamlWithMetadata(
 ): Promise<string> {
   warnDuplicateDeviceIds(layout);
 
-  const layoutForSerialization = orderLayoutFields(layout, { metadata });
+  const layoutForSerialization = orderLayoutFields(
+    withCurrentRackProfileMarkers(layout),
+    { metadata },
+  );
 
   // Prepend the editor schema hint so the folder-ZIP `.rackula.yaml` validates
   // out of the box too (#2230).
@@ -180,8 +193,8 @@ function toRuntimeLayout(parsed: LayoutZod): Layout {
 }
 
 /**
- * Validate an already-parsed runtime layout object against `LayoutSchema` and
- * convert it to a runtime Layout, returning null instead of throwing on failure.
+ * Validate an already-parsed saved layout object and convert it to a runtime
+ * Layout, returning null instead of throwing on failure.
  *
  * This is the shared ingress chokepoint for read paths that hold a runtime
  * layout object rather than a serialized YAML string (e.g. the localStorage
@@ -189,7 +202,7 @@ function toRuntimeLayout(parsed: LayoutZod): Layout {
  * schema validation and forward-compat gate as the file/server load path, so no
  * read door bypasses the schema. Any new read door must route through this
  * function (or `validateParsedLayout` for the YAML-string path) rather than
- * calling `LayoutSchema` directly.
+ * calling a schema directly.
  *
  * Forward-compat gate (#2205, #2664): a document whose data-format MAJOR
  * (`metadata.schema_version`) is newer than this app is refused here, so a
@@ -252,7 +265,13 @@ export function parseLayoutObject(parsed: unknown): Layout | null {
     body = rest;
   }
 
-  const result = LayoutSchema.safeParse(body);
+  const baseResult = LegacySavedLayoutSchemaBase.safeParse(body);
+  if (!baseResult.success) {
+    return null;
+  }
+
+  const adapted = adaptLegacyLayout(baseResult.data as unknown as Layout);
+  const result = LegacySavedLayoutSchema.safeParse(adapted);
   if (!result.success) {
     return null;
   }
@@ -310,16 +329,18 @@ function validateParsedLayout(parsed: unknown): {
 
   // Legacy + carrier-first (#2158, #2451): older files may use the v0.6 single
   // `rack` shape or carry rack-level sub-U / half-width placements that the
-  // carrier-first enforcement in LayoutSchema rejects. LayoutSchemaBase parses
+  // carrier-first enforcement in the complete schema rejects. The legacy saved
+  // base schema parses
   // and migrates structurally first - it converts a single `rack` into `racks[]`
   // and snaps pre-0.7.0 U-value positions to whole-U internal units (the same
   // structural migration migrateLayout runs on the browser localStorage path, so
   // a v0.6 single-rack YAML import reaches the same migrated layout as a browser
   // load) - but it does NOT enforce carrier-first. adaptLegacyLayout then
   // normalizes any sub-U / half-width gear into carriers, and the full
-  // LayoutSchema (with enforcement) validates the adapted result. The adapter is
-  // idempotent, so loadLayout re-running it after this parse is a no-op.
-  const baseResult = LayoutSchemaBase.safeParse(parsed);
+  // complete legacy saved schema (with enforcement) validates the adapted
+  // result. The adapter is idempotent, so loadLayout re-running it after this
+  // parse is a no-op.
+  const baseResult = LegacySavedLayoutSchemaBase.safeParse(parsed);
   if (!baseResult.success) {
     const errors = baseResult.error.issues
       .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
@@ -329,7 +350,7 @@ function validateParsedLayout(parsed: unknown): {
 
   const adapted = adaptLegacyLayout(baseResult.data as unknown as Layout);
 
-  const result = LayoutSchema.safeParse(adapted);
+  const result = LegacySavedLayoutSchema.safeParse(adapted);
 
   if (!result.success) {
     const errors = result.error.issues
@@ -377,6 +398,46 @@ export async function parseLayoutYamlWithImages(yamlString: string): Promise<{
   if (failedKeys.length > 0) {
     layoutDebug.state(
       "parseLayoutYamlWithImages: %d image(s) rejected for keys %o",
+      failedImagesCount,
+      failedKeys,
+    );
+  }
+
+  return { layout, images, failedImagesCount, failedKeys };
+}
+
+/** Parse YAML authored in the in-app editor without legacy profile inference. */
+export async function parseCurrentLayoutYamlWithImages(
+  yamlString: string,
+): Promise<{
+  layout: Layout;
+  images: ImageStoreMap;
+  failedImagesCount: number;
+  failedKeys: string[];
+}> {
+  const parsed = await parseYaml(yamlString);
+  assertSchemaVersionSupported(readSchemaVersion(parsed));
+
+  let rawImages: unknown;
+  if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const body = parsed as Record<string, unknown>;
+    rawImages = body.images;
+    delete body.images;
+  }
+
+  const result = LayoutSchema.safeParse(parsed);
+  if (!result.success) {
+    const errors = result.error.issues
+      .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+      .join(", ");
+    throw new Error(`Invalid layout: ${errors}`);
+  }
+
+  const layout = toRuntimeLayout(result.data);
+  const { images, failedImagesCount, failedKeys } = decodeYamlImages(rawImages);
+  if (failedKeys.length > 0) {
+    layoutDebug.state(
+      "parseCurrentLayoutYamlWithImages: %d image(s) rejected for keys %o",
       failedImagesCount,
       failedKeys,
     );

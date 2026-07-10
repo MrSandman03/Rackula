@@ -25,6 +25,37 @@ export function rackDepthForProfile(
   return depthMm ?? DEFAULT_RACK_DEPTH_MM;
 }
 
+function hasLegacyRackMateSignature(rack: {
+  name?: string;
+  width: Rack["width"];
+  height: number;
+  depth_mm?: number;
+}): boolean {
+  return (
+    rack.name === RACKMATE_T1_PLUS_NAME &&
+    rack.width === RACKMATE_T1_PLUS_WIDTH &&
+    rack.height === RACKMATE_T1_PLUS_HEIGHT &&
+    rack.depth_mm === RACKMATE_T1_PLUS_DEPTH_MM
+  );
+}
+
+/** Mark an otherwise ambiguous current-authored rack as explicitly Generic. */
+export function withCurrentRackProfileMarker<
+  T extends {
+    name?: string;
+    width: Rack["width"];
+    height: number;
+    profile?: RackProfile;
+    depth_mm?: number;
+  },
+>(rack: T): T {
+  return (
+    rack.profile === undefined && hasLegacyRackMateSignature(rack)
+      ? { ...rack, profile: "generic" as const }
+      : rack
+  ) as T;
+}
+
 export function withRackProfileDefaults<
   T extends {
     name?: string;
@@ -34,26 +65,41 @@ export function withRackProfileDefaults<
     depth_mm?: number;
   },
 >(rack: T): T & { width: Rack["width"]; height: number; depth_mm: number } {
-  const legacyRackMate =
-    rack.profile === undefined &&
-    rack.name === RACKMATE_T1_PLUS_NAME &&
-    rack.width === RACKMATE_T1_PLUS_WIDTH &&
-    rack.height === RACKMATE_T1_PLUS_HEIGHT &&
-    rack.depth_mm === RACKMATE_T1_PLUS_DEPTH_MM;
-  const profile = legacyRackMate ? RACKMATE_T1_PLUS_PROFILE : rack.profile;
+  // Current authoring treats an unmarked exact legacy tuple as Generic. The
+  // explicit marker keeps a later saved-layout load from mistaking it for a
+  // pre-profile RackMate document.
+  const markedRack = withCurrentRackProfileMarker(rack);
+  const profile = markedRack.profile;
   const isRackMate = profile === RACKMATE_T1_PLUS_PROFILE;
   return {
-    ...rack,
-    ...(legacyRackMate ? { profile: RACKMATE_T1_PLUS_PROFILE } : {}),
-    width: isRackMate ? RACKMATE_T1_PLUS_WIDTH : rack.width,
-    height: isRackMate ? RACKMATE_T1_PLUS_HEIGHT : rack.height,
-    depth_mm: rackDepthForProfile(profile, rack.depth_mm),
+    ...markedRack,
+    ...(profile !== undefined ? { profile } : {}),
+    width: isRackMate ? RACKMATE_T1_PLUS_WIDTH : markedRack.width,
+    height: isRackMate ? RACKMATE_T1_PLUS_HEIGHT : markedRack.height,
+    depth_mm: rackDepthForProfile(profile, markedRack.depth_mm),
   };
+}
+
+/** Apply the exact-tuple inference only at prior-release saved-data ingress. */
+export function withLegacyRackProfileDefaults<
+  T extends {
+    name?: string;
+    width: Rack["width"];
+    height: number;
+    profile?: RackProfile;
+    depth_mm?: number;
+  },
+>(rack: T): T & { width: Rack["width"]; height: number; depth_mm: number } {
+  return withRackProfileDefaults(
+    rack.profile === undefined && hasLegacyRackMateSignature(rack)
+      ? { ...rack, profile: RACKMATE_T1_PLUS_PROFILE }
+      : rack,
+  ) as T & { width: Rack["width"]; height: number; depth_mm: number };
 }
 
 /** Keep direct and recorded mutations inside a named profile's dimensions. */
 export function constrainRackProfileUpdates<T extends Partial<Rack>>(
-  rack: Pick<Rack, "profile">,
+  rack: Pick<Rack, "name" | "width" | "height" | "depth_mm" | "profile">,
   updates: T,
 ): T {
   const touchesProfileDimensions =
@@ -61,10 +107,17 @@ export function constrainRackProfileUpdates<T extends Partial<Rack>>(
     "width" in updates ||
     "height" in updates ||
     "depth_mm" in updates;
-  if (!touchesProfileDimensions) return updates;
+  const touchesLegacySignature = touchesProfileDimensions || "name" in updates;
+  if (!touchesLegacySignature) return updates;
 
   const nextProfile = "profile" in updates ? updates.profile : rack.profile;
-  if (nextProfile !== RACKMATE_T1_PLUS_PROFILE) return updates;
+  if (nextProfile !== RACKMATE_T1_PLUS_PROFILE) {
+    const nextRack = { ...rack, ...updates };
+    return nextRack.profile === undefined &&
+      hasLegacyRackMateSignature(nextRack)
+      ? ({ ...updates, profile: "generic" } as T)
+      : updates;
+  }
 
   return {
     ...updates,

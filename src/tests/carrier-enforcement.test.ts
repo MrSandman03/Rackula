@@ -1053,7 +1053,7 @@ describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => 
     }
   });
 
-  it("hydrates fit-critical fields when an embedded built-in type is stripped", () => {
+  it("treats an explicit built-in shadow as authoritative", () => {
     const dualCarrier = {
       slug: "rackmate-dual-tray",
       model: "RackMate Dual Tray",
@@ -1083,6 +1083,7 @@ describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => 
       u_height: 0.5,
       slot_width: 1 as const,
       subdevice_role: "child" as const,
+      rack_widths: [10] as const,
       category: "network",
       colour: "#4A90D9",
     };
@@ -1107,20 +1108,10 @@ describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => 
       10,
     );
 
-    const result = LayoutSchema.safeParse(layout);
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(
-        result.error.issues.some(
-          (issue) =>
-            /wider than slot/i.test(issue.message) ||
-            /taller than slot/i.test(issue.message),
-        ),
-      ).toBe(true);
-    }
+    expect(LayoutSchema.safeParse(layout).success).toBe(true);
   });
 
-  it("returns hydrated built-in types from parsed layouts", () => {
+  it("returns explicit built-in shadow types without canonical hydration", () => {
     const strippedUcgMax = {
       slug: "ubiquiti-unifi-cloud-gateway-max",
       model: "UCG-Max",
@@ -1136,12 +1127,7 @@ describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => 
     const restored = parsed.device_types.find(
       (device) => device.slug === strippedUcgMax.slug,
     );
-    const fit = restored?.custom_fields?.rackula_fit as
-      { dimensions_mm?: { width?: number } } | undefined;
-
-    expect(restored?.rack_widths).toEqual([10, 19]);
-    expect(restored?.is_full_depth).toBe(false);
-    expect(fit?.dimensions_mm?.width).toBe(141.8);
+    expect(restored).toEqual(strippedUcgMax);
   });
 
   it("enforces carrier-first rules for omitted built-ins from every brand pack", () => {

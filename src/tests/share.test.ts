@@ -25,6 +25,11 @@ import {
 import { toInternalUnits } from "$lib/utils/position";
 import type { Layout } from "$lib/types";
 import { findRegisteredBrandDevice } from "$lib/data/brandPacks/registry";
+import {
+  MAX_SHARE_DEVICES_PER_RACK,
+  MAX_SHARE_RACKS,
+  MAX_SHARE_TOTAL_DEVICES,
+} from "$lib/schemas/share";
 
 // pako 3.x exports a frozen, read-only ESM namespace, so vi.spyOn cannot
 // redefine its properties. Replace it with a spread copy whose properties are
@@ -111,6 +116,7 @@ describe("toMinimalLayout", () => {
     expect(minimal.rs[0].n).toBe(layout.racks[0].name);
     expect(minimal.rs[0].h).toBe(layout.racks[0].height);
     expect(minimal.rs[0].w).toBe(19);
+    expect(minimal.fv).toBe(3);
   });
 
   it("round-trips rack width 10", () => {
@@ -146,6 +152,33 @@ describe("toMinimalLayout", () => {
     expect(decoded.racks[0].depth_mm).toBe(260);
   });
 
+  it("round-trips an explicit Generic profile without renaming the rack", () => {
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          name: "RackMate T1 Plus",
+          width: 10,
+          height: 8,
+          depth_mm: 260,
+          profile: "generic",
+          devices: [],
+        }),
+      ],
+    });
+
+    const minimal = toMinimalLayout(layout);
+    const decoded = requireDecoded(requireEncoded(layout));
+
+    expect(minimal.rs[0]).toMatchObject({ pf: "generic", dp: 260 });
+    expect(decoded.racks[0]).toMatchObject({
+      name: "RackMate T1 Plus",
+      profile: "generic",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+  });
+
   it("round-trips a generic mini-rack custom depth", () => {
     const layout = createTestLayout({
       racks: [
@@ -169,14 +202,45 @@ describe("toMinimalLayout", () => {
     const ucgMax = findRegisteredBrandDevice(
       "ubiquiti-unifi-cloud-gateway-max",
     )!;
+    const tray = {
+      ...createTestDeviceType({
+        slug: "custom-ucg-tray",
+        category: "shelf",
+        rack_widths: [10],
+        is_full_depth: false,
+      }),
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+          accepts: ["network" as const],
+        },
+      ],
+    };
     const layout = createTestLayout({
       racks: [
         createTestRack({
           width: 10,
-          devices: [createTestDevice({ device_type: ucgMax.slug })],
+          devices: [
+            createTestDevice({
+              id: "tray-1",
+              device_type: tray.slug,
+              position: 1,
+            }),
+            {
+              id: "ucg-1",
+              device_type: ucgMax.slug,
+              position: 0,
+              face: "front",
+              container_id: "tray-1",
+              slot_id: "main",
+            },
+          ],
         }),
       ],
-      device_types: [ucgMax],
+      device_types: [tray, ucgMax],
     });
 
     const decoded = requireDecoded(requireEncoded(layout));
@@ -191,6 +255,96 @@ describe("toMinimalLayout", () => {
     expect(restored?.is_full_depth).toBe(false);
     expect(fit?.dimensions_mm?.width).toBe(141.8);
     expect(fit?.open_checks).toContain("RJ45 cable bend clearance");
+  });
+
+  it("round-trips an authoritative custom shadow of a built-in device", () => {
+    const shadow = createTestDeviceType({
+      slug: "ubiquiti-unifi-cloud-gateway-max",
+      model: "Custom Shadow Gateway",
+      u_height: 1,
+      rack_widths: [19],
+      is_full_depth: true,
+    });
+    shadow.custom_fields = {
+      owner: "local",
+      rackula_fit: {
+        dimensions_mm: { width: 440, depth: 300, height: 44 },
+      },
+    };
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          width: 19,
+          devices: [
+            createTestDevice({
+              device_type: shadow.slug,
+              position: toInternalUnits(1),
+            }),
+          ],
+        }),
+      ],
+      device_types: [shadow],
+    });
+
+    const minimal = toMinimalLayout(layout);
+    const decoded = requireDecoded(requireEncoded(layout));
+    const restored = decoded.device_types.find(
+      (deviceType) => deviceType.slug === shadow.slug,
+    );
+
+    expect(minimal.dt[0]?.o).toBe(1);
+    expect(restored).toMatchObject({
+      slug: shadow.slug,
+      model: "Custom Shadow Gateway",
+      rack_widths: [19],
+      is_full_depth: true,
+      custom_fields: { rackula_fit: shadow.custom_fields.rackula_fit },
+    });
+    expect(restored?.custom_fields?.owner).toBeUndefined();
+    expect(decoded.racks[0]?.devices[0]?.container_id).toBeUndefined();
+  });
+
+  it("keeps private device metadata out of share links", () => {
+    const deviceType = createTestDeviceType({ slug: "private-device" });
+    deviceType.notes = "private device note";
+    deviceType.serial_number = "SERIAL-PRIVATE-123";
+    deviceType.asset_tag = "ASSET-PRIVATE-456";
+    deviceType.links = [
+      { label: "private portal", url: "https://private.invalid/device" },
+    ];
+    deviceType.custom_fields = {
+      secret: "CUSTOM-FIELD-PRIVATE",
+      rackula_fit: {
+        status: "candidate",
+        secret: "FIT-FIELD-PRIVATE",
+      },
+    };
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          devices: [createTestDevice({ device_type: deviceType.slug })],
+        }),
+      ],
+      device_types: [deviceType],
+    });
+
+    const minimal = toMinimalLayout(layout);
+    const serialized = JSON.stringify(minimal);
+    const restored = requireDecoded(requireEncoded(layout)).device_types[0]!;
+
+    expect(serialized).not.toContain("SERIAL-PRIVATE-123");
+    expect(serialized).not.toContain("ASSET-PRIVATE-456");
+    expect(serialized).not.toContain("private device note");
+    expect(serialized).not.toContain("private.invalid");
+    expect(serialized).not.toContain("CUSTOM-FIELD-PRIVATE");
+    expect(serialized).not.toContain("FIT-FIELD-PRIVATE");
+    expect(restored.serial_number).toBeUndefined();
+    expect(restored.asset_tag).toBeUndefined();
+    expect(restored.notes).toBeUndefined();
+    expect(restored.links).toBeUndefined();
+    expect(restored.custom_fields).toEqual({
+      rackula_fit: { status: "candidate" },
+    });
   });
 
   it("round-trips fit-critical fields for custom devices and carriers", () => {
@@ -228,6 +382,7 @@ describe("toMinimalLayout", () => {
       device_types: [customCarrier],
     });
 
+    const minimal = toMinimalLayout(layout);
     const decoded = requireDecoded(requireEncoded(layout));
     const restored = decoded.device_types.find(
       (device) => device.slug === customCarrier.slug,
@@ -243,6 +398,7 @@ describe("toMinimalLayout", () => {
     expect(restored?.rack_widths).toEqual([10]);
     expect(restored?.is_full_depth).toBe(false);
     expect(restored?.slots?.[0]?.accepts).toEqual(["network"]);
+    expect(minimal.dt[0]?.o).toBe(1);
     expect(fit?.status).toBe("needs_measurement");
     expect(fit?.dimensions_mm?.depth).toBe(180);
     expect(fit?.open_checks).toEqual(["measure cable clearance"]);
@@ -438,6 +594,95 @@ describe("encodeLayout", () => {
 
     expect(encoded.length).toBeLessThan(200);
   });
+
+  it("does not publish a link above the per-rack device bound", () => {
+    const deviceType = createTestDeviceType({ slug: "bounded-device" });
+    const devices = Array.from(
+      { length: MAX_SHARE_DEVICES_PER_RACK + 1 },
+      (_, index) =>
+        createTestDevice({
+          id: `bounded-${index}`,
+          device_type: deviceType.slug,
+        }),
+    );
+    const layout = createTestLayout({
+      racks: [createTestRack({ devices })],
+      device_types: [deviceType],
+    });
+
+    expect(encodeLayout(layout)).toBeNull();
+  });
+
+  it("does not publish a strict share containing a bare sub-U device", () => {
+    const deviceType = createTestDeviceType({
+      slug: "bare-sub-u",
+      u_height: 0.5,
+      slot_width: 1,
+    });
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          devices: [createTestDevice({ device_type: deviceType.slug })],
+        }),
+      ],
+      device_types: [deviceType],
+    });
+
+    expect(encodeLayout(layout)).toBeNull();
+  });
+
+  it("does not publish a strict share with duplicate device definitions", () => {
+    const deviceType = createTestDeviceType({ slug: "duplicate-type" });
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          devices: [createTestDevice({ device_type: deviceType.slug })],
+        }),
+      ],
+      device_types: [deviceType, { ...deviceType }],
+    });
+
+    expect(encodeLayout(layout)).toBeNull();
+  });
+
+  it("does not publish a link above the decompressed byte limit", () => {
+    const deviceType = createTestDeviceType({ slug: "oversized-snapshot" });
+    deviceType.custom_fields = {
+      rackula_fit: {
+        open_checks: ["a".repeat(MAX_DECOMPRESSED_BYTES + 1)],
+      },
+    };
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          devices: [createTestDevice({ device_type: deviceType.slug })],
+        }),
+      ],
+      device_types: [deviceType],
+    });
+
+    expect(encodeLayout(layout)).toBeNull();
+  });
+
+  it("does not publish a link above the encoded character limit", () => {
+    let state = 0x12345678;
+    const entropy = Array.from({ length: 180_000 }, () => {
+      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
+      return String.fromCharCode(33 + ((state >>> 16) % 90));
+    }).join("");
+    const deviceType = createTestDeviceType({ slug: "high-entropy-snapshot" });
+    deviceType.custom_fields = { rackula_fit: { open_checks: [entropy] } };
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          devices: [createTestDevice({ device_type: deviceType.slug })],
+        }),
+      ],
+      device_types: [deviceType],
+    });
+
+    expect(encodeLayout(layout)).toBeNull();
+  });
 });
 
 describe("decodeLayout", () => {
@@ -612,6 +857,71 @@ describe("decodeLayout", () => {
 
     expect(result.layout).toBeNull();
     expect(result.error).toBeDefined();
+  });
+
+  it("accepts the documented 100-rack and 4200-device extreme", () => {
+    const devicesPerRack = MAX_SHARE_TOTAL_DEVICES / MAX_SHARE_RACKS;
+    const encoded = LZString.compressToEncodedURIComponent(
+      JSON.stringify({
+        v: "1.0",
+        fv: 3,
+        n: "Documented Extreme",
+        rs: Array.from({ length: MAX_SHARE_RACKS }, (_, rackIndex) => ({
+          i: String(rackIndex),
+          n: `Rack ${rackIndex}`,
+          h: 42,
+          w: 19,
+          d: Array.from({ length: devicesPerRack }, () => ({
+            t: "repeated-device",
+            p: 1,
+            f: "front",
+          })),
+        })),
+        dt: [
+          {
+            s: "repeated-device",
+            h: 1,
+            c: "#336699",
+            x: "s",
+            o: 1,
+          },
+        ],
+      }),
+    );
+
+    expect(encoded.length).toBeLessThanOrEqual(MAX_ENCODED_LENGTH);
+    const decoded = requireDecoded(encoded);
+    expect(decoded.racks).toHaveLength(MAX_SHARE_RACKS);
+    expect(
+      decoded.racks.reduce((total, rack) => total + rack.devices.length, 0),
+    ).toBe(MAX_SHARE_TOTAL_DEVICES);
+  });
+
+  it("rejects a highly compressed payload above the device cardinality limit", () => {
+    const devicesPerRack =
+      Math.floor(MAX_SHARE_TOTAL_DEVICES / MAX_SHARE_RACKS) + 1;
+    const encoded = LZString.compressToEncodedURIComponent(
+      JSON.stringify({
+        v: "1.0",
+        fv: 3,
+        n: "Repetitive hostile layout",
+        rs: Array.from({ length: MAX_SHARE_RACKS }, (_, rackIndex) => ({
+          i: String(rackIndex),
+          n: `Rack ${rackIndex}`,
+          h: 42,
+          w: 19,
+          d: Array.from({ length: devicesPerRack }, () => ({
+            t: "repeated-device",
+            p: 1,
+            f: "front",
+          })),
+        })),
+        dt: [{ s: "repeated-device", h: 1, c: "#336699", x: "s" }],
+      }),
+    );
+
+    expect(encoded.length).toBeLessThanOrEqual(MAX_ENCODED_LENGTH);
+    expect(decodeLayout(encoded).layout).toBeNull();
   });
 });
 
@@ -1043,6 +1353,226 @@ describe("multi-rack share", () => {
     ).toBeDefined();
   });
 
+  it("hydrates partial built-in definitions from legacy compact links", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 2,
+      n: "Legacy Compact Built-In",
+      rs: [
+        {
+          i: "0",
+          n: "Mini Rack",
+          h: 8,
+          w: 10,
+          d: [],
+        },
+      ],
+      dt: [
+        {
+          s: "ubiquiti-unifi-cloud-gateway-max",
+          h: 0.5,
+          m: "UCG-Max",
+          c: "#4A90D9",
+          x: "n",
+          sw: 1,
+          sr: "child",
+        },
+      ],
+    });
+
+    const decoded = requireDecoded(encoded);
+    const restored = decoded.device_types.find(
+      (deviceType) => deviceType.slug === "ubiquiti-unifi-cloud-gateway-max",
+    );
+    const fit = restored?.custom_fields?.rackula_fit as
+      { dimensions_mm?: { width?: number } } | undefined;
+
+    expect(restored?.rack_widths).toEqual([10, 19]);
+    expect(restored?.is_full_depth).toBe(false);
+    expect(fit?.dimensions_mm?.width).toBe(141.8);
+  });
+
+  it("rejects a current built-in definition without its authoritative snapshot", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 3,
+      n: "Malformed Current Built-In",
+      rs: [{ i: "0", n: "Mini Rack", h: 8, w: 10, d: [] }],
+      dt: [
+        {
+          s: "ubiquiti-unifi-cloud-gateway-max",
+          h: 0.5,
+          m: "Crafted replacement",
+          c: "#4A90D9",
+          x: "n",
+          sw: 1,
+          sr: "child",
+        },
+      ],
+    });
+
+    expect(decodeLayout(encoded).layout).toBeNull();
+  });
+
+  it.each([undefined, 1, 2])(
+    "loads legacy explicit multirow overflow with format version %s",
+    (formatVersion) => {
+      const encoded = encodeLegacyPayload({
+        v: "1.0",
+        ...(formatVersion === undefined ? {} : { fv: formatVersion }),
+        n: "Legacy Explicit Overflow",
+        rs: [
+          {
+            i: "0",
+            n: "Legacy Rack",
+            h: 8,
+            w: 19,
+            d: [
+              { t: "legacy-container", p: 1, f: "front" },
+              {
+                t: "legacy-child",
+                p: 0,
+                f: "front",
+                ci: 0,
+                si: "bottom",
+              },
+            ],
+          },
+        ],
+        dt: [
+          {
+            s: "legacy-container",
+            h: 2,
+            c: "#336699",
+            x: "h",
+            sl: [
+              { id: "bottom", r: 0, cl: 0, wf: 1, hu: 2 },
+              { id: "top", r: 1, cl: 0, wf: 1, hu: 1 },
+            ],
+          },
+          { s: "legacy-child", h: 2, c: "#336699", x: "s" },
+        ],
+      });
+
+      const decoded = requireDecoded(encoded);
+      const child = decoded.racks[0]?.devices.find(
+        (device) => device.device_type === "legacy-child",
+      );
+
+      expect(child?.container_id).toBeDefined();
+      expect(child?.slot_id).toBe("bottom");
+    },
+  );
+
+  it.each([undefined, 1, 2])(
+    "adapts a legacy bare half-width device with format version %s",
+    (formatVersion) => {
+      const encoded = encodeLegacyPayload({
+        v: "1.0",
+        ...(formatVersion === undefined ? {} : { fv: formatVersion }),
+        n: "Legacy Bare Half-Width",
+        rs: [
+          {
+            i: "0",
+            n: "Rack",
+            h: 8,
+            w: 19,
+            d: [{ t: "legacy-half-width", p: 1, f: "front" }],
+          },
+        ],
+        dt: [
+          {
+            s: "legacy-half-width",
+            h: 1,
+            c: "#336699",
+            x: "s",
+            sw: 1,
+          },
+        ],
+      });
+
+      const decoded = requireDecoded(encoded);
+      const child = decoded.racks[0]?.devices.find(
+        (device) => device.device_type === "legacy-half-width",
+      );
+
+      expect(child?.container_id).toBeDefined();
+      expect(child?.slot_id).toBe("col-1");
+    },
+  );
+
+  it("rejects a bare sub-U device in strict format v3", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 3,
+      n: "Malformed Current Share",
+      rs: [
+        {
+          i: "0",
+          n: "Rack",
+          h: 8,
+          w: 19,
+          d: [{ t: "bare-sub-u", p: 1, f: "front" }],
+        },
+      ],
+      dt: [{ s: "bare-sub-u", h: 0.5, c: "#336699", x: "s", sw: 1 }],
+    });
+
+    expect(decodeLayout(encoded).layout).toBeNull();
+  });
+
+  it("rejects a placed device whose type definition is missing", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 3,
+      n: "Missing Device Type",
+      rs: [
+        {
+          i: "0",
+          n: "Rack",
+          h: 8,
+          w: 19,
+          d: [{ t: "not-registered-anywhere", p: 1, f: "front" }],
+        },
+      ],
+      dt: [],
+    });
+
+    expect(decodeLayout(encoded).layout).toBeNull();
+  });
+
+  it("rejects a current built-in placement omitted from the type table", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 3,
+      n: "Missing Built-In Definition",
+      rs: [
+        {
+          i: "0",
+          n: "Rack",
+          h: 8,
+          w: 19,
+          d: [{ t: "1u-server", p: 1, f: "front" }],
+        },
+      ],
+      dt: [],
+    });
+
+    expect(decodeLayout(encoded).layout).toBeNull();
+  });
+
+  it("rejects current-format semantics on the legacy v1 shape", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 3,
+      n: "Invalid Current V1",
+      r: { n: "Rack", h: 8, w: 19, d: [] },
+      dt: [],
+    });
+
+    expect(decodeLayout(encoded).layout).toBeNull();
+  });
+
   it("infers the RackMate profile from an exact legacy v1 rack tuple", () => {
     const encoded = encodeLegacyPayload({
       v: "1.0",
@@ -1062,11 +1592,37 @@ describe("multi-rack share", () => {
     expect(decoded.racks[0]?.depth_mm).toBe(260);
   });
 
-  it("infers the RackMate profile from an exact legacy v2 rack tuple", () => {
+  it.each([undefined, 1, 2])(
+    "infers the RackMate profile from an exact legacy v2 tuple with format version %s",
+    (formatVersion) => {
+      const encoded = encodeLegacyPayload({
+        v: "1.0",
+        ...(formatVersion === undefined ? {} : { fv: formatVersion }),
+        n: "Legacy RackMate Layout",
+        rs: [
+          {
+            i: "0",
+            n: "RackMate T1 Plus",
+            h: 8,
+            w: 10,
+            d: [],
+          },
+        ],
+        dt: [],
+      });
+
+      const decoded = requireDecoded(encoded);
+
+      expect(decoded.racks[0]?.profile).toBe("rackmate-t1-plus");
+      expect(decoded.racks[0]?.depth_mm).toBe(260);
+    },
+  );
+
+  it("keeps an exact omitted-profile tuple generic in format v3", () => {
     const encoded = encodeLegacyPayload({
       v: "1.0",
-      fv: 2,
-      n: "Legacy RackMate Layout",
+      fv: 3,
+      n: "Current Generic Layout",
       rs: [
         {
           i: "0",
@@ -1081,8 +1637,106 @@ describe("multi-rack share", () => {
 
     const decoded = requireDecoded(encoded);
 
-    expect(decoded.racks[0]?.profile).toBe("rackmate-t1-plus");
-    expect(decoded.racks[0]?.depth_mm).toBe(260);
+    expect(decoded.racks[0]?.profile).toBeUndefined();
+  });
+
+  it("rejects compact links from a future share format", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 4,
+      n: "Future Share",
+      rs: [{ i: "0", n: "Rack", h: 8, w: 19, d: [] }],
+      dt: [],
+    });
+
+    expect(decodeLayout(encoded).layout).toBeNull();
+  });
+
+  it.each([
+    ["height", { h: 9 }],
+    ["width", { w: 19 }],
+    ["depth", { dp: 300 }],
+  ])(
+    "rejects an explicit RackMate profile with mismatched %s",
+    (_label, override) => {
+      const encoded = encodeLegacyPayload({
+        v: "1.0",
+        fv: 3,
+        n: "Crafted RackMate",
+        rs: [
+          {
+            i: "0",
+            n: "RackMate T1 Plus",
+            h: 8,
+            w: 10,
+            pf: "rackmate-t1-plus",
+            d: [],
+            ...override,
+          },
+        ],
+        dt: [],
+      });
+
+      expect(decodeLayout(encoded).layout).toBeNull();
+    },
+  );
+
+  it("rejects an out-of-bounds device in a crafted RackMate share", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 3,
+      n: "Crafted RackMate",
+      rs: [
+        {
+          i: "0",
+          n: "RackMate T1 Plus",
+          h: 8,
+          w: 10,
+          pf: "rackmate-t1-plus",
+          d: [{ t: "two-u-device", p: 8, f: "front" }],
+        },
+      ],
+      dt: [
+        {
+          s: "two-u-device",
+          h: 2,
+          c: "#336699",
+          x: "s",
+          rw: [10],
+        },
+      ],
+    });
+
+    expect(decodeLayout(encoded).layout).toBeNull();
+  });
+
+  it("rejects a rack-width-incompatible device in a crafted RackMate share", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 3,
+      n: "Crafted RackMate",
+      rs: [
+        {
+          i: "0",
+          n: "RackMate T1 Plus",
+          h: 8,
+          w: 10,
+          pf: "rackmate-t1-plus",
+          d: [{ t: "nineteen-inch-device", p: 1, f: "front" }],
+        },
+      ],
+      dt: [
+        {
+          s: "nineteen-inch-device",
+          h: 1,
+          c: "#336699",
+          x: "s",
+          rw: [19],
+        },
+      ],
+    });
+
+    expect(decodeLayout(encoded).layout).toBeNull();
   });
 
   it.each([
@@ -1110,7 +1764,7 @@ describe("multi-rack share", () => {
 
     const decoded = requireDecoded(encoded);
 
-    expect(decoded.racks[0]?.profile).toBeUndefined();
+    expect(decoded.racks[0]?.profile).not.toBe("rackmate-t1-plus");
   });
 
   it("decodes pako-encoded v2 share links (backward compatibility)", () => {
@@ -1142,6 +1796,35 @@ describe("multi-rack share", () => {
     ).toBeDefined();
   });
 
+  it("re-encodes a workspace-loaded v1 share with partial metadata", () => {
+    const legacy = encodeLegacyPayload({
+      v: "26.6.6",
+      n: "Visual Test Layout",
+      r: {
+        n: "Rack A",
+        h: 12,
+        w: 19,
+        d: [
+          { t: "vis-switch", p: 1, f: "front", n: "Switch" },
+          { t: "vis-server", p: 3, f: "front", n: "Server" },
+          { t: "vis-pdu", p: 10, f: "rear", n: "PDU" },
+        ],
+      },
+      dt: [
+        { s: "vis-switch", h: 1, c: "#4A90A4", x: "n" },
+        { s: "vis-server", h: 2, c: "#7B6FA3", x: "s" },
+        { s: "vis-pdu", h: 2, c: "#A4705A", x: "w" },
+      ],
+    });
+
+    const decoded = {
+      ...requireDecoded(legacy),
+      metadata: { id: "33333333-3333-4333-8333-333333333333" },
+    };
+
+    expect(requireEncoded(decoded)).not.toBe(legacy);
+  });
+
   it("decodes a large pako-encoded share link with multi-byte UTF-8 spanning chunk boundaries", () => {
     // Regression guard for the pako 3.x migration. pako's streaming Inflate emits
     // 64 KB Uint8Array chunks, so a payload larger than one chunk can split a
@@ -1149,10 +1832,13 @@ describe("multi-rack share", () => {
     // single streaming TextDecoder; decoding each chunk in isolation corrupts those
     // characters. 中 is 3 bytes and 65536 is not a multiple of 3, so boundaries fall
     // mid-character. ~240 KB decompressed spans ~4 chunks but deflates to a tiny link.
-    const longName = "中".repeat(80000);
+    const longMarker = "中".repeat(80000);
     const serverType = createTestDeviceType({ slug: "pako-server" });
+    serverType.custom_fields = {
+      rackula_fit: { open_checks: [longMarker] },
+    };
     const layout = createTestLayout({
-      name: longName,
+      name: "UTF-8 Streaming Layout",
       racks: [
         createTestRack({
           devices: [
@@ -1172,8 +1858,10 @@ describe("multi-rack share", () => {
     const { layout: decoded } = decodeLayout(encoded);
 
     expect(decoded).not.toBeNull();
-    expect(decoded!.name).toBe(longName);
-    expect(decoded!.name).not.toContain("�");
+    const fit = decoded!.device_types[0]?.custom_fields?.rackula_fit as
+      { open_checks?: string[] } | undefined;
+    expect(fit?.open_checks?.[0]).toBe(longMarker);
+    expect(fit?.open_checks?.[0]).not.toContain("�");
   });
 
   it("uses lz-string encoding for new share links", () => {

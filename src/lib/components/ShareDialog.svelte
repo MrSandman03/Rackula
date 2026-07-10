@@ -37,7 +37,7 @@
   const toastStore = getToastStore();
 
   // Generate share URL
-  const shareUrl = $derived(generateShareUrl(layout));
+  const shareUrl = $derived(open ? generateShareUrl(layout) : null);
   const urlLength = $derived(shareUrl?.length ?? 0);
   const isTooLong = $derived(urlLength > URL_LENGTH_WARNING);
   const fitsInQR = $derived(shareUrl ? canFitInQR(shareUrl) : false);

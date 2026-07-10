@@ -1,8 +1,13 @@
 import type { DeviceType, Rack, RackProfile } from "$lib/types";
 import { requiresChassisBay } from "./carrier-rules";
-import { canPlaceInSlot } from "./collision";
+import { canDeviceFitRackEnvelope, canPlaceInSlot } from "./collision";
 import { findDeviceType } from "./device-lookup";
-import { getDeviceDimensionsMm, rackWidthToMillimetres } from "./slot-fit";
+import {
+  getDeviceDepthMm,
+  getDeviceDimensionsMm,
+  rackWidthToMillimetres,
+  SLOT_DIMENSION_TOLERANCE_MM,
+} from "./slot-fit";
 import {
   getMountRecommendation,
   getRecommendedMountSlugs,
@@ -107,16 +112,33 @@ function firstFittingMount(
   device: DeviceType,
   rackWidth: Rack["width"],
   library: DeviceType[],
+  rackDepthMm?: number,
+  rackHeight?: number,
 ): DeviceType | undefined {
-  return findRecommendedMounts(device, library).find((mount) =>
-    (mount.slots ?? []).some((slot) =>
+  return findRecommendedMounts(device, library).find((mount) => {
+    if (rackHeight !== undefined && mount.u_height > rackHeight) return false;
+
+    const mountDepthMm = getDeviceDepthMm(mount);
+    const childDepthMm = getDeviceDepthMm(device);
+    const assemblyDepthMm = Math.max(mountDepthMm ?? 0, childDepthMm ?? 0);
+    if (
+      !canDeviceFitRackEnvelope(
+        { width: rackWidth, depth_mm: rackDepthMm },
+        mount,
+        assemblyDepthMm > 0 ? assemblyDepthMm : undefined,
+      )
+    ) {
+      return false;
+    }
+
+    return (mount.slots ?? []).some((slot) =>
       canPlaceInSlot(device, slot, {
         rackWidth,
         containerHeightUnits: mount.u_height,
         containerSlots: mount.slots,
       }),
-    ),
-  );
+    );
+  });
 }
 
 function labelForMount(mount: DeviceType): string {
@@ -128,6 +150,8 @@ export function getRackFitSummary(
   rackWidth: Rack["width"],
   library: DeviceType[] = [],
   rackProfile?: RackProfile,
+  rackDepthMm?: number,
+  rackHeight?: number,
 ): RackFitSummary | null {
   const fit = rackulaFitFields(device);
   const rackWidthMm = rackWidthToMillimetres(rackWidth);
@@ -135,7 +159,7 @@ export function getRackFitSummary(
   if (
     dimensions?.width !== undefined &&
     rackWidthMm !== undefined &&
-    dimensions.width > rackWidthMm
+    dimensions.width > rackWidthMm + SLOT_DIMENSION_TOLERANCE_MM
   ) {
     return {
       label: "Wide",
@@ -144,9 +168,29 @@ export function getRackFitSummary(
     };
   }
 
+  if (
+    dimensions?.depth !== undefined &&
+    rackDepthMm !== undefined &&
+    dimensions.depth > rackDepthMm
+  ) {
+    return {
+      label: "Deep",
+      title: `${dimensions.depth}mm deep exceeds this rack's ${rackDepthMm}mm depth`,
+      tone: "blocked",
+    };
+  }
+
+  if (rackHeight !== undefined && device.u_height > rackHeight) {
+    return {
+      label: "Tall",
+      title: `${device.u_height}U high exceeds this rack's ${rackHeight}U height`,
+      tone: "blocked",
+    };
+  }
+
   const needsBay = requiresChassisBay(device, rackWidth);
   const fittingMount = needsBay
-    ? firstFittingMount(device, rackWidth, library)
+    ? firstFittingMount(device, rackWidth, library, rackDepthMm, rackHeight)
     : undefined;
   const recommendedMountSlugs = needsBay
     ? getRecommendedMountSlugs(device)
@@ -154,7 +198,8 @@ export function getRackFitSummary(
   if (needsBay && recommendedMountSlugs.length > 0 && !fittingMount) {
     return {
       label: "No bay",
-      title: "Recommended mounts do not fit this rack width or slot geometry",
+      title:
+        "Recommended mounts do not fit this rack width, height, depth, or slot geometry",
       tone: "blocked",
     };
   }

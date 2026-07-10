@@ -57,6 +57,8 @@
       selectedDeviceInfo.rack.width,
       layoutStore.device_types,
       selectedDeviceInfo.rack.profile,
+      selectedDeviceInfo.rack.depth_mm,
+      selectedDeviceInfo.rack.height,
     ),
   );
   const criticalRackFitSummary = $derived(

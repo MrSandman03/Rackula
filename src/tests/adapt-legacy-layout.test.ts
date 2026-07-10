@@ -611,7 +611,11 @@ describe("adaptLegacyLayout", () => {
           { id: "bay-2", position: { row: 0, col: 1 }, width_fraction: 0.5 },
         ],
       });
-      const gear = createTestDeviceType({ slug: "gear", u_height: 1 });
+      const gear = createTestDeviceType({
+        slug: "gear",
+        u_height: 1,
+        slot_width: 1,
+      });
       const layout = createTestLayout({
         device_types: [shelf, gear],
         racks: [

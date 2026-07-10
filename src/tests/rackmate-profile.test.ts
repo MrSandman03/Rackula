@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { LayoutSchema, RackSchema } from "$lib/schemas";
+import {
+  LayoutSchema,
+  LegacySavedLayoutSchema,
+  RackSchema,
+} from "$lib/schemas";
 import { createDefaultRack } from "$lib/utils/serialization";
 import { getLayoutStore, resetLayoutStore } from "$lib/stores/layout.svelte";
 import { resetHistoryStore } from "$lib/stores/history.svelte";
@@ -73,6 +77,35 @@ describe("RackMate profile defaults", () => {
     expect(parsed.depth_mm).toBe(RACKMATE_T1_PLUS_DEPTH_MM);
   });
 
+  it("uses an explicit Generic marker to suppress legacy tuple inference", () => {
+    const parsed = LegacySavedLayoutSchema.parse({
+      version: "1.0.0",
+      name: "Explicit Generic layout",
+      racks: [
+        {
+          ...rackInput,
+          name: "RackMate T1 Plus",
+          height: 8,
+          depth_mm: 260,
+          profile: "generic",
+        },
+      ],
+      device_types: [],
+      settings: {
+        display_mode: "label",
+        show_labels_on_images: false,
+      },
+    });
+
+    expect(parsed.racks[0]).toMatchObject({
+      name: "RackMate T1 Plus",
+      profile: "generic",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+  });
+
   it("preserves generic 10-inch dimensions when loading a layout", () => {
     const parsed = LayoutSchema.parse({
       version: "1.0.0",
@@ -91,7 +124,7 @@ describe("RackMate profile defaults", () => {
   });
 
   it("migrates the exact legacy RackMate signature to the named profile", () => {
-    const parsed = LayoutSchema.parse({
+    const parsed = LegacySavedLayoutSchema.parse({
       version: "1.0.0",
       name: "Legacy RackMate layout",
       racks: [
@@ -111,6 +144,33 @@ describe("RackMate profile defaults", () => {
 
     expect(parsed.racks[0]).toMatchObject({
       profile: "rackmate-t1-plus",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+  });
+
+  it("keeps the exact legacy tuple generic at the strict authoring boundary", () => {
+    const parsed = LayoutSchema.parse({
+      version: "1.0.0",
+      name: "Current authored layout",
+      racks: [
+        {
+          ...rackInput,
+          name: "RackMate T1 Plus",
+          height: 8,
+          depth_mm: 260,
+        },
+      ],
+      device_types: [],
+      settings: {
+        display_mode: "label",
+        show_labels_on_images: false,
+      },
+    });
+
+    expect(parsed.racks[0]).toMatchObject({
+      profile: "generic",
       width: 10,
       height: 8,
       depth_mm: 260,
@@ -384,6 +444,40 @@ describe("RackMate profile defaults", () => {
       height: 8,
       depth_mm: 260,
     });
+  });
+
+  it("marks an edited exact legacy tuple Generic in the same undo entry", () => {
+    const store = getLayoutStore();
+    const rack = store.addRack("Generic", 12, 19)!;
+    store.clearHistory();
+
+    store.updateRack(rack.id, {
+      name: "RackMate T1 Plus",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+
+    expect(store.getRackById(rack.id)).toMatchObject({
+      name: "RackMate T1 Plus",
+      profile: "generic",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+    expect(LegacySavedLayoutSchema.parse(store.layout).racks[0]?.profile).toBe(
+      "generic",
+    );
+
+    expect(store.undo()).toBe(true);
+    expect(store.getRackById(rack.id)).toMatchObject({
+      name: "Generic",
+      width: 19,
+      height: 12,
+      depth_mm: 1000,
+    });
+    expect(store.getRackById(rack.id)?.profile).toBeUndefined();
+    expect(store.undo()).toBe(false);
   });
 
   it("records implicit profile dimensions for exact direct undo and redo", () => {

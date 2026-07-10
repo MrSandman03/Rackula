@@ -237,57 +237,100 @@
   }
 
   function handleWidthPresetClick(width: Rack["width"]) {
-    const selectRackMate = width === 10;
-    const changesProfile = selectRackMate !== isRackMateRack;
-    if (width === selectedRack.width && !changesProfile) {
+    if (width === selectedRack.width) {
       resizeError = null;
       return;
     }
 
     const group =
       selectedGroup ?? layoutStore.getRackGroupForRack(selectedRack.id);
-    if (group?.layout_preset === "bayed" && changesProfile) {
+    if (group?.layout_preset === "bayed") {
+      resizeError = "Bayed rack widths must be changed as a group.";
+      rackHeight = selectedRack.height;
+      rackDepth = selectedRack.depth_mm ?? DEFAULT_RACK_DEPTH_MM;
+      return;
+    }
+
+    const result = canFitRackDimensions(
+      selectedRack,
+      {
+        width,
+        height: selectedRack.height,
+        depth_mm: selectedRack.depth_mm,
+      },
+      layoutStore.device_types,
+    );
+    if (!result.allowed) {
+      const conflictDetails = getConflictDetails(
+        result.conflicts,
+        layoutStore.device_types,
+      );
+      resizeError = `${width}-inch rails cannot contain ${formatConflictMessage(conflictDetails)}`;
+      return;
+    }
+
+    resizeError = null;
+    layoutStore.updateRack(selectedRack.id, {
+      width,
+      ...(isRackMateRack ? { profile: "generic" as const } : {}),
+    });
+  }
+
+  function handleProfileChange(profile: "generic" | "rackmate") {
+    const selectRackMate = profile === "rackmate";
+    if (
+      (selectRackMate && isRackMateRack) ||
+      (!selectRackMate && selectedRack.profile === "generic")
+    ) {
+      resizeError = null;
+      return;
+    }
+
+    const group =
+      selectedGroup ?? layoutStore.getRackGroupForRack(selectedRack.id);
+    if (group?.layout_preset === "bayed") {
       resizeError = "Bayed rack profiles must be changed as a group.";
       rackHeight = selectedRack.height;
       rackDepth = selectedRack.depth_mm ?? DEFAULT_RACK_DEPTH_MM;
       return;
     }
 
-    if (selectRackMate) {
-      const result = canFitRackDimensions(
-        selectedRack,
-        {
-          width: 10,
-          height: RACKMATE_T1_PLUS_HEIGHT,
-          depth_mm: RACKMATE_T1_PLUS_DEPTH_MM,
-        },
-        layoutStore.device_types,
-      );
-
-      if (!result.allowed) {
-        const conflictDetails = getConflictDetails(
-          result.conflicts,
-          layoutStore.device_types,
-        );
-        resizeError = `RackMate T1 Plus cannot contain ${formatConflictMessage(conflictDetails)}`;
-        rackHeight = selectedRack.height;
-        return;
-      }
-
-      rackHeight = RACKMATE_T1_PLUS_HEIGHT;
-      rackDepth = RACKMATE_T1_PLUS_DEPTH_MM;
+    if (!selectRackMate) {
       resizeError = null;
+      layoutStore.updateRack(selectedRack.id, {
+        profile: "generic",
+      });
+      return;
     }
 
+    const result = canFitRackDimensions(
+      selectedRack,
+      {
+        width: 10,
+        height: RACKMATE_T1_PLUS_HEIGHT,
+        depth_mm: RACKMATE_T1_PLUS_DEPTH_MM,
+      },
+      layoutStore.device_types,
+    );
+
+    if (!result.allowed) {
+      const conflictDetails = getConflictDetails(
+        result.conflicts,
+        layoutStore.device_types,
+      );
+      resizeError = `RackMate T1 Plus cannot contain ${formatConflictMessage(conflictDetails)}`;
+      rackHeight = selectedRack.height;
+      return;
+    }
+
+    rackHeight = RACKMATE_T1_PLUS_HEIGHT;
+    rackDepth = RACKMATE_T1_PLUS_DEPTH_MM;
+    resizeError = null;
     layoutStore.updateRack(selectedRack.id, {
-      width,
-      profile: selectRackMate ? RACKMATE_T1_PLUS_PROFILE : undefined,
-      ...(selectRackMate
-        ? {
-            height: RACKMATE_T1_PLUS_HEIGHT,
-            depth_mm: RACKMATE_T1_PLUS_DEPTH_MM,
-          }
-        : {}),
+      width: 10,
+      height: RACKMATE_T1_PLUS_HEIGHT,
+      depth_mm: RACKMATE_T1_PLUS_DEPTH_MM,
+      profile: RACKMATE_T1_PLUS_PROFILE,
     });
   }
 
@@ -422,6 +465,19 @@
         </button>
       {/each}
     </div>
+  </div>
+
+  <div class="form-group">
+    <span class="field-label">Profile</span>
+    <SegmentedControl
+      options={[
+        { value: "generic", label: "Generic" },
+        { value: "rackmate", label: "RackMate T1 Plus" },
+      ]}
+      value={isRackMateRack ? "rackmate" : "generic"}
+      onchange={(value) => handleProfileChange(value as "generic" | "rackmate")}
+      ariaLabel="Rack profile"
+    />
   </div>
 
   <div class="form-group">
@@ -591,7 +647,8 @@
     gap: var(--space-1-5);
   }
 
-  .form-group label {
+  .form-group label,
+  .field-label {
     font-size: var(--font-size-base);
     font-weight: var(--font-weight-medium);
     color: var(--colour-text);

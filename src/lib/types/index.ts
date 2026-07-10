@@ -608,8 +608,8 @@ export interface PlacedDevice {
 // Rack Types
 // =============================================================================
 
-/** Named physical rack profiles with fixed dimensions. */
-export type RackProfile = "rackmate-t1-plus";
+/** Persisted rack profile selection. Generic explicitly opts out of inference. */
+export type RackProfile = "generic" | "rackmate-t1-plus";
 
 /**
  * A rack unit container

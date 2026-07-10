@@ -116,9 +116,12 @@ function projectRackMateProfileConstraints(value: unknown): unknown {
     : null;
   const profile =
     properties && isObject(properties.profile) ? properties.profile : null;
+  const profileValues = Array.isArray(profile?.enum)
+    ? profile.enum
+    : [profile?.const];
   const isRackSchema =
     projected.type === "object" &&
-    profile?.const === RACKMATE_T1_PLUS_PROFILE &&
+    profileValues.includes(RACKMATE_T1_PLUS_PROFILE) &&
     properties?.height !== undefined &&
     properties.width !== undefined &&
     properties.depth_mm !== undefined;

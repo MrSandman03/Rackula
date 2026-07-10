@@ -10,7 +10,11 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { LayoutSchema, LayoutMetadataSchema } from "$lib/schemas";
+import {
+  LayoutSchema,
+  LayoutMetadataSchema,
+  LegacySavedLayoutSchema,
+} from "$lib/schemas";
 import { createTestRack, createTestLayoutSettings } from "./factories";
 
 // ============================================================================
@@ -293,7 +297,7 @@ describe("LayoutSchema metadata integration", () => {
         device_types: [],
         settings: createTestLayoutSettings({ show_labels_on_images: true }),
       };
-      const result = LayoutSchema.safeParse(legacyLayout);
+      const result = LegacySavedLayoutSchema.safeParse(legacyLayout);
       expect(result.success).toBe(true);
       if (result.success) {
         // metadata should be undefined for legacy layouts
@@ -321,12 +325,12 @@ describe("LayoutSchema metadata integration", () => {
         device_types: [],
         settings: createTestLayoutSettings({ show_labels_on_images: true }),
       };
-      const result = LayoutSchema.safeParse(legacyLayout);
+      const result = LegacySavedLayoutSchema.safeParse(legacyLayout);
       expect(result.success).toBe(true);
       if (result.success) {
         // Position migrates from human-readable U (1-indexed) to internal units (6 per U).
         // Legacy position 10 (U10) becomes 60 internal units (10 * 6).
-        // This migration is handled by LayoutSchema's transform for version < 0.7.0.
+        // This migration is handled by the saved-layout transform for version < 0.7.0.
         expect(result.data.racks[0]!.devices[0]!.position).toBe(60);
         // metadata should be undefined
         expect(result.data.metadata).toBeUndefined();
