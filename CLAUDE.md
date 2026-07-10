@@ -150,6 +150,12 @@ Repository-installed external review apps and vendor-specific review CLIs are no
 - Simple solutions over abstractions; three similar lines > premature abstraction
 - Delete unused code completely (no `_unused` vars)
 
+**File length:**
+
+- Tracked code and test files have a hard limit of 1,000 physical lines
+- Run `npm run check:file-lengths`; the hosted validation workflow enforces it
+- Split files along cohesive responsibilities; do not remove tests or compress readable code merely to pass the limit
+
 **No dead-code hacks:**
 
 - No renaming to `_unusedVar`

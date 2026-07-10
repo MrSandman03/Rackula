@@ -74,6 +74,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Check file lengths
+        run: npm run check:file-lengths
+
       - name: Run linter
         run: npm run lint
 
