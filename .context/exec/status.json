@@ -55,11 +55,11 @@
       "branch": "fix/legacy-line-limits",
       "worktree": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
       "blockers": [],
-      "last_event": "Persisted the zero-violation implementation and enforcement commits; exact-head cold review is next.",
-      "last_updated": "2026-07-10T20:50:29Z"
+      "last_event": "Review gaps are fixed and verified in d1e297a9; a new exact-head cold review is next.",
+      "last_updated": "2026-07-10T21:14:46Z"
     }
   },
   "target_locks": {},
-  "last_updated": "2026-07-10T20:50:29Z",
-  "last_event": "Persisted the zero-violation implementation and enforcement commits; exact-head cold review is next."
+  "last_updated": "2026-07-10T21:14:46Z",
+  "last_event": "Review gaps are fixed and verified in d1e297a9; a new exact-head cold review is next."
 }

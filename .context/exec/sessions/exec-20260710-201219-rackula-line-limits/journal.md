@@ -31,7 +31,7 @@
 - Split all 16 inherited files above 1,000 lines without dropping test declarations, public exports, generated mappings, registry order, storage behavior, schema compatibility, or UI callbacks.
 - Added `check:file-lengths`, focused unit coverage, active contributor guidance, and a blocking hosted `validate` step.
 - The checker scans tracked and new code files and now reports zero violations.
-- Largest remaining in-scope file is `RackDevice.svelte` at 988 lines.
+- Largest remaining in-scope file is `src/lib/stores/commands/device.ts` at 999 lines.
 
 ## 2026-07-10T20:46:21Z - Integrated local verification passed
 
@@ -49,3 +49,19 @@
 - Commit `d23f0fa2` adds the tested 1,000-line checker, contributor guidance, npm command, and blocking hosted validation step.
 - The working tree contains only the exec evidence update plus the local dependency symlink used by the worktree.
 - Advanced to exact-head independent review before branch push or draft PR creation.
+
+## 2026-07-10T21:06:24Z - Exact-head review requested fixes
+
+- Two independent cold reviews passed the runtime, UI, schema, storage, export, registry-order, generated-mapping, and split-test preservation checks at exact head `655763b46bb006a098d5019ecb572afda0a25d55`.
+- A third independent review requested NetBox workflow regeneration wiring, orchestration-level generator coverage plus a CI freshness check, and corrections to the exec provenance evidence.
+- No runtime or compatibility regression was found; step 6 entered retry 1 to close the review gaps before a new exact-head review.
+- Corrected step 1 provenance to baseline commit `df1b18e9`, step 4 provenance to implementation commit `026a2bc4`, and the largest remaining file metric to 999 lines.
+
+## 2026-07-10T21:14:46Z - Review fixes implemented and verified
+
+- Commit `d1e297a9` wires generated manifests into the NetBox import workflow, blocks manifest drift in hosted CI, exports a side-effect-free injectable generator entrypoint, and adds five orchestration-level integration tests.
+- Generator integration coverage now proves repeated-run determinism, stable vendor and device ordering, export-collision rejection, stale-module cleanup, and line-limit rejection before destructive replacement.
+- Focused generator and line-limit tests passed 20 tests across 3 files; the complete frontend suite passed 246 files / 3,592 tests.
+- The real generator ran twice with byte-identical output; both workflow YAML files parse and the exact CI freshness shell gate passes.
+- File lengths, formatting, ESLint, Svelte/TypeScript diagnostics, production build, ledger validation, and diff hygiene all pass.
+- Step 6 remains in review until independent reviewers approve the new exact head.

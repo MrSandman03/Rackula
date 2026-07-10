@@ -19,7 +19,7 @@
       "worktree_path": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
       "retries": 0,
       "review_verdict": "PASS",
-      "merged_commits": ["026a2bc41d54f88a110a9af2c86867a431cfa0d1"],
+      "merged_commits": ["df1b18e92b41f96d413d7c60bca8652b14baea8a"],
       "warnings": []
     },
     "2": {
@@ -49,7 +49,7 @@
       "worktree_path": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
       "retries": 0,
       "review_verdict": null,
-      "merged_commits": [],
+      "merged_commits": ["026a2bc41d54f88a110a9af2c86867a431cfa0d1"],
       "warnings": []
     },
     "5": {
@@ -67,9 +67,9 @@
       "status": "reviewing",
       "branch": "fix/legacy-line-limits",
       "worktree_path": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
-      "retries": 0,
+      "retries": 1,
       "review_verdict": null,
-      "merged_commits": [],
+      "merged_commits": ["d1e297a971879bbb7f4f1f6ea185960aa2a62fbc"],
       "warnings": []
     }
   },
@@ -80,5 +80,5 @@
     "review_threshold": "major"
   },
   "started_at": "2026-07-10T20:12:19Z",
-  "last_updated": "2026-07-10T20:49:39Z"
+  "last_updated": "2026-07-10T21:14:46Z"
 }
