@@ -4,11 +4,7 @@
  */
 
 import type { DeviceType, DeviceFace, Rack } from "$lib/types";
-import {
-  canPlaceDevice,
-  canPlaceInSlot,
-  findNextFreeChildPosition,
-} from "./collision";
+import { canPlaceInContainer, canPlaceDevice } from "./collision";
 import { RAIL_WIDTH } from "$lib/constants/layout";
 import { toInternalUnits, toHumanUnits } from "./position";
 import { effectiveFace } from "./effective-face";
@@ -296,6 +292,7 @@ export function detectContainerDropTarget(
   rackHeight: number,
   uHeight: number,
   faceFilter?: DeviceFace,
+  excludeDeviceId?: string,
 ): ContainerDropTarget | null {
   if (draggedDevice.slots?.length) return null;
 
@@ -326,14 +323,8 @@ export function detectContainerDropTarget(
     const containerTopY = (rackHeight - containerTopU) * uHeight;
     const localY = mouseY - containerTopY;
 
-    const children = rack.devices.filter(
-      (d) => d.container_id === container.id,
-    );
-    const occupied = new Set(
-      children.map((c) => c.slot_id).filter((id): id is string => !!id),
-    );
-
-    // Prefer the cell directly under the cursor when it is free and fits.
+    // The cell under the pointer is the cell that will receive the drop. Use the
+    // complete validator so hover, preview, and commit agree on every constraint.
     const aimed = slotAtPoint(
       slots,
       xOffsetInRack,
@@ -344,37 +335,37 @@ export function detectContainerDropTarget(
     );
     if (
       aimed &&
-      !occupied.has(aimed.id) &&
-      canPlaceInSlot(draggedDevice, aimed, {
-        rackWidth: rack.width,
-        containerHeightUnits: containerType.u_height,
-        containerSlots: slots,
-      })
+      canPlaceInContainer(
+        rack,
+        deviceLibrary,
+        container,
+        containerType,
+        draggedDevice,
+        aimed.id,
+        0,
+        excludeDeviceId,
+      )
     ) {
       return { containerId: container.id, slotId: aimed.id, position: 0 };
     }
 
-    // Otherwise fall back to the first free cell (also covers an occupied aim).
-    const fittingSlots = slots.filter((slot) =>
-      canPlaceInSlot(draggedDevice, slot, {
-        rackWidth: rack.width,
-        containerHeightUnits: containerType.u_height,
-        containerSlots: slots,
-      }),
-    );
-    const free = findNextFreeChildPosition(
-      { ...containerType, slots: fittingSlots },
-      children,
-    );
-    if (free) {
-      return {
-        containerId: container.id,
-        slotId: free.slotId,
-        position: free.position,
-      };
+    for (const slot of slots) {
+      if (slot.id === aimed?.id) continue;
+      if (
+        canPlaceInContainer(
+          rack,
+          deviceLibrary,
+          container,
+          containerType,
+          draggedDevice,
+          slot.id,
+          0,
+          excludeDeviceId,
+        )
+      ) {
+        return { containerId: container.id, slotId: slot.id, position: 0 };
+      }
     }
-
-    // Container is under the cursor but full: do not fall through to the rail.
     return null;
   }
 
@@ -434,6 +425,7 @@ export function detectContainerHover(
   rackHeight: number,
   uHeight: number,
   faceFilter?: DeviceFace,
+  excludeDeviceId?: string,
 ): ContainerHoverInfo | null {
   const targetU = calculateDropPosition(mouseY, rackHeight, uHeight, 0);
 
@@ -470,17 +462,25 @@ export function detectContainerHover(
       deviceType.u_height,
     );
 
+    const resolvedTarget = detectContainerDropTarget(
+      rack,
+      deviceLibrary,
+      draggedDevice,
+      mouseY,
+      xOffsetInRack,
+      rackWidth,
+      rackHeight,
+      uHeight,
+      faceFilter,
+      excludeDeviceId,
+    );
+    const resolvedForContainer =
+      resolvedTarget?.containerId === placedDevice.id ? resolvedTarget : null;
+
     return {
       containerId: placedDevice.id,
-      targetSlotId: slot?.id ?? null,
-      isValidTarget:
-        !draggedDevice.slots?.length && slot
-          ? canPlaceInSlot(draggedDevice, slot, {
-              rackWidth: rack.width,
-              containerHeightUnits: deviceType.u_height,
-              containerSlots: slots,
-            })
-          : false,
+      targetSlotId: resolvedForContainer?.slotId ?? slot?.id ?? null,
+      isValidTarget: resolvedForContainer !== null,
     };
   }
 

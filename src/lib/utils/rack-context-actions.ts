@@ -11,6 +11,7 @@ import { toHumanUnits, toInternalUnits } from "$lib/utils/position";
 import { canPlaceDevice } from "$lib/utils/collision";
 import { effectiveFace } from "$lib/utils/effective-face";
 import { flipDeviceFaceAt } from "$lib/actions/selection-actions";
+import { handleDelete as openDeleteConfirmation } from "$lib/utils/dialog-actions";
 
 /** Identifies a right-clicked device and the screen position for the context menu. */
 export interface ContextMenuTarget {
@@ -113,8 +114,12 @@ export function createContextMenuActions(
   }
 
   function handleDelete(target: ContextMenuTarget): void {
-    layoutStore.removeDeviceFromRack(target.rackId, target.deviceIndex);
-    selectionStore.clearSelection();
+    const rack = layoutStore.getRackById(target.rackId);
+    const device = rack?.devices[target.deviceIndex];
+    if (!device) return;
+
+    selectionStore.selectDevice(target.rackId, device.id);
+    openDeleteConfirmation();
   }
 
   function getCanMoveUp(

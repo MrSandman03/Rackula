@@ -12,13 +12,17 @@
 import type { DeviceFace, PlacedDevice } from "$lib/types";
 import { UNITS_PER_U } from "$lib/types/constants";
 import {
+  canPlaceDevice,
   canPlaceInContainer,
-  canPlaceInSlot,
   canMoveRackAssemblyToRack,
+  findEmptyAutoCarrierAfterChildMove,
+  findExistingContainerPlacement,
   findValidDropPositions,
-  findNextFreeChildPosition,
   findNextSlotForChild,
+  getPlacedAssemblyDepthMm,
+  getProspectiveRackAfterDeviceMove,
   isContainerChild,
+  requiresCarrier,
   resolveSynthesizedCarrierPlacement,
   synthesizeCarrierForDevice,
 } from "$lib/utils/collision";
@@ -32,8 +36,10 @@ import {
   createPlaceDeviceCommand,
   createAddDeviceTypeCommand,
   createBatchCommand,
-  createCrossRackMoveCommand,
+  createCrossRackDevicesTransitionCommand,
+  createDuplicateDeviceAssemblyCommand,
   createMoveToSlotCommand,
+  createRackDevicesTransitionCommand,
 } from "../commands";
 import type { LayoutStateAccess } from "./types";
 import { getCommandStoreAdapter } from "./command-adapters";
@@ -45,6 +51,24 @@ import {
 
 /** Snapshot function injected by the facade ($state.snapshot is a rune). */
 export type SnapshotDeviceFn = (device: PlacedDevice) => PlacedDevice;
+
+function clonePortsWithFreshIds(
+  device: PlacedDevice,
+  deviceType: ReturnType<typeof findDeviceType>,
+): PlacedDevice["ports"] {
+  return device.ports
+    ? device.ports.map((port) => ({ ...port, id: generateId() }))
+    : deviceType
+      ? instantiatePorts(deviceType)
+      : undefined;
+}
+
+function withoutDeviceIds(
+  devices: PlacedDevice[],
+  ids: ReadonlySet<string>,
+): PlacedDevice[] {
+  return devices.filter((device) => !ids.has(device.id));
+}
 
 /**
  * Duplicate a placed device within a rack
@@ -88,13 +112,32 @@ export function duplicateDevice(
     return { error: "Device type not found" };
   }
 
-  // Find valid positions on the same face
+  const children = sourceRack.devices.filter(
+    (candidate) => candidate.container_id === sourceDevice.id,
+  );
+  const assemblyDepth = getPlacedAssemblyDepthMm(
+    sourceRack,
+    layout.device_types,
+    sourceDevice,
+  );
   const validPositions = findValidDropPositions(
     sourceRack,
     layout.device_types,
     deviceType.u_height,
     sourceDevice.face,
     deviceType,
+  ).filter((position) =>
+    canPlaceDevice(
+      sourceRack,
+      layout.device_types,
+      deviceType.u_height,
+      position,
+      undefined,
+      sourceDevice.face,
+      undefined,
+      deviceType,
+      assemblyDepth,
+    ),
   );
 
   if (validPositions.length === 0) {
@@ -129,8 +172,7 @@ export function duplicateDevice(
     ...snapshotDevice(sourceDevice),
     id: generateId(),
     position: targetPosition,
-    // Regenerate ports with new IDs
-    ports: instantiatePorts(deviceType),
+    ports: clonePortsWithFreshIds(sourceDevice, deviceType),
     // Don't copy container_id - duplicates are independent rack-level devices
     container_id: undefined,
     slot_id: undefined,
@@ -143,11 +185,30 @@ export function duplicateDevice(
   const history = ctx.getHistory();
   const adapter = getCommandStoreAdapter(ctx);
   const deviceName = deviceType.model ?? deviceType.slug;
-
-  const command = createPlaceDeviceCommand(
-    duplicatedDevice,
+  const duplicatedChildren = children.map((child) => {
+    const childType = findDeviceType(child.device_type, layout.device_types);
+    return {
+      ...snapshotDevice(child),
+      id: generateId(),
+      container_id: duplicatedDevice.id,
+      ports: clonePortsWithFreshIds(child, childType),
+    };
+  });
+  const beforeDevices = sourceRack.devices.map(snapshotDevice);
+  const command = createDuplicateDeviceAssemblyCommand(
+    rackId,
+    beforeDevices,
+    [...beforeDevices, duplicatedDevice, ...duplicatedChildren],
+    [
+      { sourceId: sourceDevice.id, targetId: duplicatedDevice.id },
+      ...children.map((child, index) => ({
+        sourceId: child.id,
+        targetId: duplicatedChildren[index]!.id,
+      })),
+    ],
     adapter,
-    `${deviceName} (Copy)`,
+    deviceName,
+    layout.metadata?.id ?? "",
   );
   history.execute(command);
   ctx.markDirty();
@@ -357,6 +418,28 @@ export function placeDeviceSmart(
     return false;
   }
 
+  const positionInternal = toInternalUnits(positionU);
+  const needsContainer = requiresCarrier(deviceType, targetRack.width);
+  const existingPlacement = needsContainer
+    ? findExistingContainerPlacement(
+        targetRack,
+        layout.device_types,
+        deviceType,
+        positionInternal,
+        face,
+      )
+    : null;
+  if (existingPlacement) {
+    return placeInContainer(
+      ctx,
+      rackId,
+      deviceTypeSlug,
+      existingPlacement.containerId,
+      existingPlacement.slotId,
+      existingPlacement.position,
+    );
+  }
+
   const carrierSlug = synthesizeCarrierForDevice(deviceType, targetRack.width);
 
   // Whole-U full-width devices mount directly to the rails.
@@ -365,45 +448,6 @@ export function placeDeviceSmart(
   }
 
   ctx.setActiveRackId(rackId);
-
-  // Prefer an existing carrier of the right kind at this U with a free cell.
-  const positionInternal = toInternalUnits(positionU);
-  const existingCarrier = targetRack.devices.find(
-    (d) =>
-      !d.container_id &&
-      d.device_type === carrierSlug &&
-      d.position === positionInternal,
-  );
-
-  if (existingCarrier) {
-    const carrierType = findDeviceType(carrierSlug, layout.device_types);
-    if (!carrierType) return false;
-    // Only consider cells the child actually fits (width/height/category).
-    const fittingSlots = (carrierType.slots ?? []).filter((slot) =>
-      canPlaceInSlot(deviceType, slot, {
-        rackWidth: targetRack.width,
-        containerHeightUnits: carrierType.u_height,
-        containerSlots: carrierType.slots,
-      }),
-    );
-    if (fittingSlots.length === 0) return false;
-    const children = targetRack.devices.filter(
-      (d) => d.container_id === existingCarrier.id,
-    );
-    const free = findNextFreeChildPosition(
-      { ...carrierType, slots: fittingSlots },
-      children,
-    );
-    if (!free) return false;
-    return placeInContainer(
-      ctx,
-      rackId,
-      deviceTypeSlug,
-      existingCarrier.id,
-      free.slotId,
-      free.position,
-    );
-  }
 
   // Synthesise a new carrier and place the child inside it.
   const carrierType = findDeviceType(carrierSlug, layout.device_types);
@@ -466,6 +510,273 @@ export function placeDeviceSmart(
   return true;
 }
 
+/** Move an existing placement into a container without changing its identity. */
+export function moveDeviceIntoContainer(
+  ctx: LayoutStateAccess,
+  fromRackId: string,
+  sourceIndex: number,
+  targetRackId: string,
+  containerId: string,
+  slotId: string,
+  position: number,
+  snapshotDevice: SnapshotDeviceFn,
+): boolean {
+  const sourceRack = getRackById(ctx, fromRackId);
+  const targetRack = getRackById(ctx, targetRackId);
+  if (!sourceRack || !targetRack) return false;
+  const sourceDevice = sourceRack.devices[sourceIndex];
+  if (!sourceDevice) return false;
+
+  const layout = ctx.getLayout();
+  const childType = findDeviceType(
+    sourceDevice.device_type,
+    layout.device_types,
+  );
+  const container = targetRack.devices.find(
+    (device) => device.id === containerId,
+  );
+  const containerType = container
+    ? findDeviceType(container.device_type, layout.device_types)
+    : undefined;
+  if (!childType || !container || !containerType) return false;
+  if (
+    !canPlaceInContainer(
+      targetRack,
+      layout.device_types,
+      container,
+      containerType,
+      childType,
+      slotId,
+      position,
+      fromRackId === targetRackId ? sourceDevice.id : undefined,
+    )
+  ) {
+    return false;
+  }
+  if (
+    fromRackId !== targetRackId &&
+    targetRack.devices.some((device) => device.id === sourceDevice.id)
+  ) {
+    return false;
+  }
+
+  const movedDevice: PlacedDevice = {
+    ...snapshotDevice(sourceDevice),
+    position,
+    face: container.face,
+    container_id: container.id,
+    slot_id: slotId,
+  };
+  if (
+    fromRackId === targetRackId &&
+    sourceDevice.container_id === movedDevice.container_id &&
+    sourceDevice.slot_id === movedDevice.slot_id &&
+    sourceDevice.position === movedDevice.position &&
+    sourceDevice.face === movedDevice.face
+  ) {
+    return true;
+  }
+
+  const history = ctx.getHistory();
+  const adapter = getCommandStoreAdapter(ctx);
+  const deviceName = childType.model ?? childType.slug;
+  const emptySourceCarrier = findEmptyAutoCarrierAfterChildMove(
+    sourceRack,
+    sourceDevice,
+    container.id,
+  );
+  const removedSourceIds = new Set([
+    sourceDevice.id,
+    ...(emptySourceCarrier ? [emptySourceCarrier.id] : []),
+  ]);
+  const transitionOptions = emptySourceCarrier
+    ? {
+        removedImageDevices: [snapshotDevice(emptySourceCarrier)],
+        layoutId: layout.metadata?.id ?? "",
+      }
+    : undefined;
+  let command;
+
+  if (fromRackId === targetRackId) {
+    const beforeDevices = sourceRack.devices.map(snapshotDevice);
+    const afterDevices = beforeDevices
+      .filter((device) => device.id !== emptySourceCarrier?.id)
+      .map((device) => (device.id === sourceDevice.id ? movedDevice : device));
+    command = createRackDevicesTransitionCommand(
+      sourceRack.id,
+      beforeDevices,
+      afterDevices,
+      adapter,
+      `Move ${deviceName} into carrier`,
+      "MOVE_DEVICE",
+      transitionOptions,
+    );
+  } else {
+    const sourceBefore = sourceRack.devices.map(snapshotDevice);
+    const targetBefore = targetRack.devices.map(snapshotDevice);
+    command = createCrossRackDevicesTransitionCommand(
+      sourceRack.id,
+      sourceBefore,
+      withoutDeviceIds(sourceBefore, removedSourceIds),
+      targetRack.id,
+      targetBefore,
+      [...targetBefore, movedDevice],
+      adapter,
+      `Move ${deviceName} into carrier`,
+      transitionOptions,
+    );
+  }
+
+  history.execute(command);
+  ctx.markDirty();
+  return true;
+}
+
+/** Move an existing carried device onto rails via a new synthesized carrier. */
+export function moveDeviceWithSmartCarrier(
+  ctx: LayoutStateAccess,
+  fromRackId: string,
+  sourceIndex: number,
+  targetRackId: string,
+  positionU: number,
+  face: DeviceFace | undefined,
+  snapshotDevice: SnapshotDeviceFn,
+): boolean {
+  const sourceRack = getRackById(ctx, fromRackId);
+  const targetRack = getRackById(ctx, targetRackId);
+  const sourceDevice = sourceRack?.devices[sourceIndex];
+  if (!sourceRack || !targetRack || !sourceDevice) return false;
+
+  const layout = ctx.getLayout();
+  const childType = findDeviceType(
+    sourceDevice.device_type,
+    layout.device_types,
+  );
+  if (!childType || childType.slots?.length) return false;
+  const targetPosition = toInternalUnits(positionU);
+  const existing = findExistingContainerPlacement(
+    targetRack,
+    layout.device_types,
+    childType,
+    targetPosition,
+    face,
+    fromRackId === targetRackId ? sourceDevice.id : undefined,
+  );
+  if (existing) {
+    return moveDeviceIntoContainer(
+      ctx,
+      fromRackId,
+      sourceIndex,
+      targetRackId,
+      existing.containerId,
+      existing.slotId,
+      existing.position,
+      snapshotDevice,
+    );
+  }
+
+  const carrierSlug = synthesizeCarrierForDevice(childType, targetRack.width);
+  const carrierType = carrierSlug
+    ? findDeviceType(carrierSlug, layout.device_types)
+    : undefined;
+  if (!carrierSlug || !carrierType) return false;
+  const prospectiveTargetRack =
+    fromRackId === targetRackId
+      ? getProspectiveRackAfterDeviceMove(targetRack, sourceDevice.id)
+      : targetRack;
+  const placement = resolveSynthesizedCarrierPlacement(
+    prospectiveTargetRack,
+    layout.device_types,
+    childType,
+    carrierType,
+    targetPosition,
+    undefined,
+  );
+  if (!placement) return false;
+
+  const carrier: PlacedDevice = {
+    id: generateId(),
+    device_type: carrierSlug,
+    position: targetPosition,
+    face: "both",
+    auto_created: true,
+    ports: instantiatePorts(carrierType),
+  };
+  const movedChild: PlacedDevice = {
+    ...snapshotDevice(sourceDevice),
+    position: placement.position,
+    face: carrier.face,
+    container_id: carrier.id,
+    slot_id: placement.slotId,
+  };
+
+  const adapter = getCommandStoreAdapter(ctx);
+  const childName = childType.model ?? childType.slug;
+  const emptySourceCarrier = findEmptyAutoCarrierAfterChildMove(
+    sourceRack,
+    sourceDevice,
+    carrier.id,
+  );
+  const removedSourceIds = new Set([
+    sourceDevice.id,
+    ...(emptySourceCarrier ? [emptySourceCarrier.id] : []),
+  ]);
+  const transitionOptions = emptySourceCarrier
+    ? {
+        removedImageDevices: [snapshotDevice(emptySourceCarrier)],
+        layoutId: layout.metadata?.id ?? "",
+      }
+    : undefined;
+  let moveCommand;
+  if (sourceRack.id === targetRack.id) {
+    const before = sourceRack.devices.map(snapshotDevice);
+    moveCommand = createRackDevicesTransitionCommand(
+      sourceRack.id,
+      before,
+      [...withoutDeviceIds(before, removedSourceIds), carrier, movedChild],
+      adapter,
+      `Move ${childName} into carrier`,
+      "MOVE_DEVICE",
+      transitionOptions,
+    );
+  } else {
+    const sourceBefore = sourceRack.devices.map(snapshotDevice);
+    const targetBefore = targetRack.devices.map(snapshotDevice);
+    if (targetBefore.some((device) => device.id === sourceDevice.id)) {
+      return false;
+    }
+    moveCommand = createCrossRackDevicesTransitionCommand(
+      sourceRack.id,
+      sourceBefore,
+      withoutDeviceIds(sourceBefore, removedSourceIds),
+      targetRack.id,
+      targetBefore,
+      [...targetBefore, carrier, movedChild],
+      adapter,
+      `Move ${childName} into carrier`,
+      transitionOptions,
+    );
+  }
+
+  const carrierImport = !layout.device_types.some(
+    (deviceType) => deviceType.slug === carrierSlug,
+  )
+    ? createAddDeviceTypeCommand(carrierType, adapter)
+    : undefined;
+  ctx
+    .getHistory()
+    .execute(
+      carrierImport
+        ? createBatchCommand(`Move ${childName} into carrier`, [
+            carrierImport,
+            moveCommand,
+          ])
+        : moveCommand,
+    );
+  ctx.markDirty();
+  return true;
+}
+
 /**
  * Move a device from one rack to another
  * Supports both within-rack moves (delegates to moveDeviceRecorded) and cross-rack moves.
@@ -489,7 +800,14 @@ export function moveDeviceToRack(
 ): boolean {
   // Same-rack move — delegate to existing function (face bundled into single undo entry)
   if (fromRackId === toRackId) {
-    return moveDeviceRecorded(ctx, fromRackId, deviceIndex, newPosition, face);
+    return moveDeviceRecorded(
+      ctx,
+      fromRackId,
+      deviceIndex,
+      newPosition,
+      face,
+      snapshotDevice,
+    );
   }
 
   // Cross-rack move
@@ -528,41 +846,57 @@ export function moveDeviceToRack(
   const children = sourceRack.devices.filter(
     (child) => child.container_id === device.id,
   );
-
-  const parentSnapshot = snapshotDevice(device);
-  const childrenSnapshots = children.map((child) => snapshotDevice(child));
-
-  // Compute removal indices sorted descending for safe removal
-  const allRemovals = [
-    { index: deviceIndex },
-    ...children.map((child) => ({
-      index: sourceRack.devices.indexOf(child),
-    })),
-  ].sort((a, b) => b.index - a.index);
-  const sortedRemovalIndices = allRemovals.map((r) => r.index);
-
   const deviceName = deviceType.model ?? deviceType.slug;
+  const sourceBefore = sourceRack.devices.map(snapshotDevice);
+  const targetBefore = targetRack.devices.map(snapshotDevice);
+  const parentSnapshot = snapshotDevice(device);
+  const childrenSnapshots = children.map(snapshotDevice);
+  const movedParent: PlacedDevice = {
+    ...parentSnapshot,
+    position: positionInternal,
+    face: effectiveFace,
+    container_id: undefined,
+    slot_id: undefined,
+  };
+  const movedChildren = childrenSnapshots.map((child) => ({
+    ...child,
+    face: effectiveFace,
+  }));
+  const movingIds = new Set([
+    movedParent.id,
+    ...movedChildren.map((child) => child.id),
+  ]);
+  if (targetBefore.some((candidate) => movingIds.has(candidate.id))) {
+    return false;
+  }
 
-  // Set active rack for command creation
-  ctx.setActiveRackId(fromRackId);
-
-  const history = ctx.getHistory();
+  const emptySourceCarrier = findEmptyAutoCarrierAfterChildMove(
+    sourceRack,
+    device,
+  );
+  const sourceRemovalIds = new Set([
+    ...movingIds,
+    ...(emptySourceCarrier ? [emptySourceCarrier.id] : []),
+  ]);
   const adapter = getCommandStoreAdapter(ctx);
-
-  const command = createCrossRackMoveCommand(
-    fromRackId,
-    sortedRemovalIndices,
-    toRackId,
-    positionInternal,
-    effectiveFace,
-    parentSnapshot,
-    childrenSnapshots,
+  const command = createCrossRackDevicesTransitionCommand(
+    sourceRack.id,
+    sourceBefore,
+    withoutDeviceIds(sourceBefore, sourceRemovalIds),
+    targetRack.id,
+    targetBefore,
+    [...targetBefore, movedParent, ...movedChildren],
     adapter,
-    deviceName,
-    layout.metadata?.id ?? "",
+    `Move ${deviceName} to another rack`,
+    emptySourceCarrier
+      ? {
+          removedImageDevices: [snapshotDevice(emptySourceCarrier)],
+          layoutId: layout.metadata?.id ?? "",
+        }
+      : undefined,
   );
 
-  history.execute(command);
+  ctx.getHistory().execute(command);
   ctx.markDirty();
   return true;
 }

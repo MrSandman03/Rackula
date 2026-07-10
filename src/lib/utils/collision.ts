@@ -77,7 +77,8 @@ export interface URange {
 /**
  * Get the range occupied by a device at a given position in internal units.
  * For rack-level devices, position is in internal units (6 = U1).
- * For container children, use getContainerChildRange instead.
+ * Container children use a separate half-open fractional range in their
+ * validator below.
  *
  * @param position - Bottom position in internal units (e.g., 6 for U1)
  * @param heightU - Device height in U (e.g., 2 for a 2U device)
@@ -88,22 +89,6 @@ export function getDeviceURange(position: number, heightU: number): URange {
   return {
     bottom: position,
     top: position + heightInternal - 1,
-  };
-}
-
-/**
- * Get the range occupied by a container child device.
- * Container children use 0-indexed positions relative to the container,
- * and do NOT use the internal unit system.
- *
- * @param position - 0-indexed position from container bottom
- * @param heightU - Device height in U
- * @returns Range of positions {bottom, top}
- */
-function getContainerChildRange(position: number, heightU: number): URange {
-  return {
-    bottom: position,
-    top: position + heightU - 1,
   };
 }
 
@@ -160,7 +145,9 @@ export function getPlacedAssemblyDepthMm(
   deviceLibrary: DeviceType[],
   placedDevice: PlacedDevice,
   visited = new Set<string>(),
+  excludeDeviceId?: string,
 ): number | undefined {
+  if (placedDevice.id === excludeDeviceId) return undefined;
   if (visited.has(placedDevice.id)) return undefined;
   visited.add(placedDevice.id);
 
@@ -169,11 +156,13 @@ export function getPlacedAssemblyDepthMm(
 
   for (const child of rack.devices) {
     if (child.container_id !== placedDevice.id) continue;
+    if (child.id === excludeDeviceId) continue;
     const childDepth = getPlacedAssemblyDepthMm(
       rack,
       deviceLibrary,
       child,
       visited,
+      excludeDeviceId,
     );
     if (childDepth !== undefined) {
       depth = depth === undefined ? childDepth : Math.max(depth, childDepth);
@@ -181,6 +170,57 @@ export function getPlacedAssemblyDepthMm(
   }
 
   return depth;
+}
+
+/** Resolve an auto-created carrier that becomes empty after this child moves. */
+export function findEmptyAutoCarrierAfterChildMove(
+  rack: Rack,
+  child: PlacedDevice,
+  destinationContainerId?: string,
+): PlacedDevice | undefined {
+  if (!child.container_id || child.container_id === destinationContainerId) {
+    return undefined;
+  }
+
+  const parent = rack.devices.find(
+    (device) => device.id === child.container_id,
+  );
+  if (!parent?.auto_created) return undefined;
+
+  return rack.devices.some(
+    (device) => device.container_id === parent.id && device.id !== child.id,
+  )
+    ? undefined
+    : parent;
+}
+
+/**
+ * Build the rack roster used to validate an existing placement's destination.
+ * The moving placement no longer contributes at its old location, and a
+ * last-child auto carrier no longer contributes when the child leaves it.
+ */
+export function getProspectiveRackAfterDeviceMove(
+  rack: Rack,
+  deviceId: string,
+  destinationContainerId?: string,
+): Rack {
+  const movingDevice = rack.devices.find((device) => device.id === deviceId);
+  if (!movingDevice) return rack;
+
+  const emptyAutoCarrier = findEmptyAutoCarrierAfterChildMove(
+    rack,
+    movingDevice,
+    destinationContainerId,
+  );
+  const removedIds = new Set([
+    movingDevice.id,
+    ...(emptyAutoCarrier ? [emptyAutoCarrier.id] : []),
+  ]);
+
+  return {
+    ...rack,
+    devices: rack.devices.filter((device) => !removedIds.has(device.id)),
+  };
 }
 
 /**
@@ -286,6 +326,36 @@ function getTargetAssemblyDepthMm(
     : Math.max(ownDepth, assemblyDepth);
 }
 
+/**
+ * Check the rack's physical envelope without considering U position or other
+ * placed devices. This is the shared width/depth gate for placement, fit
+ * reporting, and assembly planning.
+ */
+export function canDeviceFitRackEnvelope(
+  rack: Pick<Rack, "width" | "depth_mm">,
+  deviceType: DeviceType,
+  targetAssemblyDepthMm?: number,
+): boolean {
+  if (!isDeviceCompatibleWithRackWidth(deviceType, rack.width)) return false;
+
+  const deviceWidthMm = getDeviceDimensionsMm(deviceType)?.width;
+  const rackWidthMm = rackWidthToMillimetres(rack.width);
+  if (
+    deviceWidthMm !== undefined &&
+    rackWidthMm !== undefined &&
+    deviceWidthMm > rackWidthMm + SLOT_DIMENSION_TOLERANCE_MM
+  ) {
+    return false;
+  }
+
+  const deviceDepthMm = targetAssemblyDepthMm ?? getDeviceDepthMm(deviceType);
+  return !(
+    deviceDepthMm !== undefined &&
+    rack.depth_mm !== undefined &&
+    deviceDepthMm > rack.depth_mm
+  );
+}
+
 function doPlacedDevicesCollideByFaceAndDepth(
   rack: Rack,
   faceA: DeviceFace,
@@ -325,29 +395,11 @@ export function canPlaceDevice(
   legacyDepthOrDeviceType?: unknown,
   deviceTypeArg?: DeviceType,
   targetAssemblyDepthMm?: number,
+  excludeAssemblyDeviceId?: string,
 ): boolean {
   const targetDeviceType = isDeviceType(legacyDepthOrDeviceType)
     ? legacyDepthOrDeviceType
     : deviceTypeArg;
-
-  if (
-    targetDeviceType &&
-    !isDeviceCompatibleWithRackWidth(targetDeviceType, rack.width)
-  ) {
-    return false;
-  }
-
-  const targetWidthMm = targetDeviceType
-    ? getDeviceDimensionsMm(targetDeviceType)?.width
-    : undefined;
-  const rackWidthMm = rackWidthToMillimetres(rack.width);
-  if (
-    targetWidthMm !== undefined &&
-    rackWidthMm !== undefined &&
-    targetWidthMm > rackWidthMm + SLOT_DIMENSION_TOLERANCE_MM
-  ) {
-    return false;
-  }
 
   const targetDepthMm =
     targetAssemblyDepthMm ??
@@ -358,9 +410,8 @@ export function canPlaceDevice(
       excludeIndex,
     );
   if (
-    targetDepthMm !== undefined &&
-    rack.depth_mm !== undefined &&
-    targetDepthMm > rack.depth_mm
+    targetDeviceType &&
+    !canDeviceFitRackEnvelope(rack, targetDeviceType, targetDepthMm)
   ) {
     return false;
   }
@@ -425,7 +476,13 @@ export function canPlaceDevice(
           targetDepthMm,
           placedDevice.face,
           device,
-          getPlacedAssemblyDepthMm(rack, deviceLibrary, placedDevice),
+          getPlacedAssemblyDepthMm(
+            rack,
+            deviceLibrary,
+            placedDevice,
+            new Set<string>(),
+            excludeAssemblyDeviceId,
+          ),
         )
       ) {
         return false;
@@ -694,6 +751,7 @@ export function resolveSynthesizedCarrierPlacement(
   targetPosition: number,
   excludeIndex?: number,
 ): { slotId: string; position: number } | null {
+  if (childType.slots?.length) return null;
   if (!isDeviceCompatibleWithRackWidth(childType, rack.width)) return null;
 
   const carrierDepth = getDeviceDepthMm(carrierType);
@@ -730,6 +788,73 @@ export function resolveSynthesizedCarrierPlacement(
   );
 
   return findNextFreeChildPosition({ ...carrierType, slots: fittingSlots }, []);
+}
+
+export interface ExistingContainerPlacement {
+  containerId: string;
+  slotId: string;
+  position: number;
+  containerHeight: number;
+}
+
+function faceIsReachable(
+  placedFace: DeviceFace,
+  targetFace: DeviceFace | undefined,
+): boolean {
+  if (!targetFace || targetFace === "both" || placedFace === "both")
+    return true;
+  return placedFace === targetFace;
+}
+
+/**
+ * Find an existing container at a rail position that can accept the child now.
+ * The full container validator is used so occupancy, child depth, opposing-face
+ * depth, slot dimensions, and rack width all stay in one decision path.
+ */
+export function findExistingContainerPlacement(
+  rack: Rack,
+  deviceLibrary: DeviceType[],
+  childType: DeviceType,
+  targetPosition: number,
+  targetFace?: DeviceFace,
+  excludeDeviceId?: string,
+): ExistingContainerPlacement | null {
+  if (childType.slots?.length) return null;
+
+  for (const container of rack.devices) {
+    if (container.container_id || container.position !== targetPosition)
+      continue;
+
+    const containerType = findDeviceType(container.device_type, deviceLibrary);
+    if (!containerType?.slots?.length) continue;
+    if (!faceIsReachable(effectiveFace(container, containerType), targetFace)) {
+      continue;
+    }
+
+    for (const slot of containerType.slots) {
+      if (
+        canPlaceInContainer(
+          rack,
+          deviceLibrary,
+          container,
+          containerType,
+          childType,
+          slot.id,
+          0,
+          excludeDeviceId,
+        )
+      ) {
+        return {
+          containerId: container.id,
+          slotId: slot.id,
+          position: 0,
+          containerHeight: containerType.u_height,
+        };
+      }
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -856,13 +981,16 @@ export function canPlaceInContainer(
     return false;
   }
 
-  const containerIndex = rack.devices.findIndex(
+  const prospectiveRack = excludeDeviceId
+    ? getProspectiveRackAfterDeviceMove(rack, excludeDeviceId, container.id)
+    : rack;
+  const containerIndex = prospectiveRack.devices.findIndex(
     (device) => device.id === container.id,
   );
   if (containerIndex === -1) return false;
 
   const existingAssemblyDepth = getPlacedAssemblyDepthMm(
-    rack,
+    prospectiveRack,
     deviceLibrary,
     container,
   );
@@ -879,7 +1007,7 @@ export function canPlaceInContainer(
   // front/rear pair exceed the rack depth.
   if (
     !canPlaceDevice(
-      rack,
+      prospectiveRack,
       deviceLibrary,
       containerType.u_height,
       container.position,
@@ -895,9 +1023,10 @@ export function canPlaceInContainer(
 
   // Find all sibling devices in the same container and slot
   // Container children use 0-indexed positions, not internal units
-  const newRange = getContainerChildRange(targetPosition, childType.u_height);
+  const newBottom = targetPosition;
+  const newTopExclusive = targetPosition + childType.u_height;
 
-  for (const device of rack.devices) {
+  for (const device of prospectiveRack.devices) {
     // Only check devices in the same container
     if (device.container_id !== container.id) {
       continue;
@@ -923,13 +1052,10 @@ export function canPlaceInContainer(
     }
 
     // Container children use 0-indexed positions, not internal units
-    const existingRange = getContainerChildRange(
-      device.position,
-      siblingType.u_height,
-    );
+    const existingBottom = device.position;
+    const existingTopExclusive = device.position + siblingType.u_height;
 
-    // Check for U range overlap within the slot
-    if (doRangesOverlap(newRange, existingRange)) {
+    if (newBottom < existingTopExclusive && newTopExclusive > existingBottom) {
       return false;
     }
   }

@@ -135,18 +135,23 @@ export function primeKeyboardPlacement(
     return;
   }
 
-  // A device that can only mount inside a chassis bay (a chassis child, or a
-  // half-width device with no rail carrier) has no rail target in any rack.
-  // State the honest requirement and exit placement mode rather than arming a
-  // futile cursor the user could only Escape out of (#2854).
-  if (requiresChassisBay(device, rack.width)) {
+  const positions = validFor(deps, rack, device);
+  // A bay-only child can use an existing compatible chassis. Only exit when the
+  // focused rack has no such target and no rail carrier can be synthesized.
+  const hasBayInAnyRack = deps
+    .getRacks()
+    .some((candidate) => validFor(deps, candidate, device).length > 0);
+  if (
+    requiresChassisBay(device, rack.width) &&
+    positions.length === 0 &&
+    !hasBayInAnyRack
+  ) {
     deps.abandonPlacement();
     deps.announce(pickUpNeedsChassisAnnouncement(device));
     return;
   }
 
   deps.setActiveRack(rack.id);
-  const positions = validFor(deps, rack, device);
   const start = initialCursorPosition(positions);
   if (start == null) {
     deps.announce(pickUpNoSpaceAnnouncement(device, rack.name));

@@ -239,6 +239,12 @@
   let longPressFired = $state(false);
   let pointerStartPos: { x: number; y: number } | null = $state(null);
   let activePointerId: number | null = $state(null);
+  let childPointerState: PointerState = $state("idle");
+  let childPointerStartPos: { x: number; y: number } | null = $state(null);
+  let childActivePointerId: number | null = $state(null);
+  let activeChildId: string | null = $state(null);
+  let draggingChildId: string | null = $state(null);
+  let activeChildRectElement: SVGRectElement | null = $state(null);
 
   // Image overflow: how far device images extend past rack rails (Issue #9)
   // Real equipment extends past the rails; this creates realistic front-mounting appearance
@@ -430,6 +436,8 @@
     childType: DeviceType,
   ) {
     event.stopPropagation();
+    if (event.button !== 0) return;
+    if (event.detail !== 0) return;
     emitSelection(child.id, childType.slug, child.position);
   }
 
@@ -442,6 +450,157 @@
     event.preventDefault();
     event.stopPropagation();
     emitSelection(child.id, childType.slug, child.position);
+  }
+
+  function handleChildContextMenu(event: MouseEvent, originalIndex: number) {
+    event.preventDefault();
+    event.stopPropagation();
+    openDeviceContextMenu(event.clientX, event.clientY, originalIndex);
+  }
+
+  function handleChildPointerDown(event: PointerEvent, child: PlacedDevice) {
+    if (!event.isPrimary) return;
+    if (
+      (event.pointerType === "mouse" || event.pointerType === "pen") &&
+      event.button !== 0
+    ) {
+      event.stopPropagation();
+      return;
+    }
+    event.stopPropagation();
+    event.preventDefault();
+    childPointerStartPos = { x: event.clientX, y: event.clientY };
+    childPointerState = "pressing";
+    childActivePointerId = event.pointerId;
+    activeChildId = child.id;
+    activeChildRectElement = (
+      event.currentTarget as SVGGElement
+    ).querySelector<SVGRectElement>(".child-device-rect");
+    try {
+      activeChildRectElement?.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Pointer capture is optional in test DOMs and may already be owned.
+    }
+  }
+
+  function handleChildPointerMove(
+    event: PointerEvent,
+    child: PlacedDevice,
+    childType: DeviceType,
+    originalIndex: number,
+  ) {
+    if (
+      event.pointerId !== childActivePointerId ||
+      child.id !== activeChildId ||
+      !childPointerStartPos
+    ) {
+      return;
+    }
+
+    if (childPointerState === "pressing") {
+      const distance = Math.hypot(
+        event.clientX - childPointerStartPos.x,
+        event.clientY - childPointerStartPos.y,
+      );
+      if (distance >= DRAG_THRESHOLD) {
+        childPointerState = "dragging";
+        draggingChildId = child.id;
+        setCurrentDragData(
+          createRackDeviceDragData(childType, rackId, originalIndex),
+        );
+        showDragTooltip(childType, event.clientX, event.clientY);
+        ondragstartProp?.(
+          new CustomEvent("dragstart", {
+            detail: { rackId, deviceIndex: originalIndex },
+          }),
+        );
+      }
+    }
+
+    if (childPointerState === "dragging") {
+      updateDragTooltipPosition(event.clientX, event.clientY);
+      document.dispatchEvent(
+        new CustomEvent("rackula:dragmove", {
+          detail: {
+            clientX: event.clientX,
+            clientY: event.clientY,
+            device: childType,
+            rackId,
+            deviceIndex: originalIndex,
+          },
+        }),
+      );
+    }
+  }
+
+  function resetChildPointer(): void {
+    childPointerState = "idle";
+    childPointerStartPos = null;
+    childActivePointerId = null;
+    activeChildId = null;
+    draggingChildId = null;
+    activeChildRectElement = null;
+  }
+
+  function handleChildPointerUp(
+    event: PointerEvent,
+    child: PlacedDevice,
+    childType: DeviceType,
+    originalIndex: number,
+  ) {
+    if (
+      event.pointerId !== childActivePointerId ||
+      child.id !== activeChildId
+    ) {
+      return;
+    }
+    try {
+      activeChildRectElement?.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // Pointer capture may already have been released by the browser.
+    }
+
+    if (childPointerState === "pressing") {
+      event.stopPropagation();
+      if (event.pointerType === "touch") hapticTap();
+      emitSelection(child.id, childType.slug, child.position);
+    } else if (childPointerState === "dragging") {
+      document.dispatchEvent(
+        new CustomEvent("rackula:dragend", {
+          detail: {
+            clientX: event.clientX,
+            clientY: event.clientY,
+            device: childType,
+            rackId,
+            deviceIndex: originalIndex,
+          },
+        }),
+      );
+      setCurrentDragData(null);
+      hideDragTooltip();
+      ondragendProp?.();
+    }
+    resetChildPointer();
+  }
+
+  function handleChildPointerCancel(event: PointerEvent, child: PlacedDevice) {
+    if (
+      event.pointerId !== childActivePointerId ||
+      child.id !== activeChildId
+    ) {
+      return;
+    }
+    try {
+      activeChildRectElement?.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // The browser may already have released capture while cancelling.
+    }
+    if (childPointerState === "dragging") {
+      setCurrentDragData(null);
+      hideDragTooltip();
+      ondragendProp?.();
+    }
+    resetChildPointer();
   }
 
   // Pointer Events for unified mouse/touch handling (fixes Safari foreignObject bug #397)
@@ -597,14 +756,18 @@
     activePointerId = null;
   }
 
-  function openDeviceContextMenu(x: number, y: number) {
+  function openDeviceContextMenu(
+    x: number,
+    y: number,
+    targetDeviceIndex: number = deviceIndex,
+  ) {
     // If context menu handler is provided, use it; otherwise fall back to duplicate
     if (oncontextmenuopen) {
       oncontextmenuopen(
         new CustomEvent("contextmenuopen", {
           detail: {
             rackId,
-            deviceIndex,
+            deviceIndex: targetDeviceIndex,
             x,
             y,
           },
@@ -615,7 +778,9 @@
 
     // Fallback to legacy duplicate behavior
     onduplicate?.(
-      new CustomEvent("duplicate", { detail: { rackId, deviceIndex } }),
+      new CustomEvent("duplicate", {
+        detail: { rackId, deviceIndex: targetDeviceIndex },
+      }),
     );
   }
 
@@ -860,7 +1025,7 @@
   <!-- Container children: devices placed inside this container's slots -->
   {#if isContainer && containerChildDevices.length > 0}
     <g class="container-children">
-      {#each containerChildDevices as { placedDevice: child } (child.id)}
+      {#each containerChildDevices as { placedDevice: child, originalIndex } (child.id)}
         {@const childType = getChildDeviceType(child.device_type)}
         {@const slotGeo = child.slot_id
           ? slotGeometry.get(child.slot_id)
@@ -883,6 +1048,7 @@
           <g
             class="container-child"
             class:selected={isChildSelected}
+            class:dragging={draggingChildId === child.id}
             transform="translate({childX}, {childY})"
             role="button"
             tabindex="0"
@@ -892,12 +1058,20 @@
             data-device-uuid={child.id}
             data-testid="container-child-device"
             onclick={(event) => handleChildClick(event, child, childType)}
-            onpointerdown={(event) => event.stopPropagation()}
+            oncontextmenu={(event) =>
+              handleChildContextMenu(event, originalIndex)}
+            onpointerdown={(event) => handleChildPointerDown(event, child)}
+            onpointermove={(event) =>
+              handleChildPointerMove(event, child, childType, originalIndex)}
+            onpointerup={(event) =>
+              handleChildPointerUp(event, child, childType, originalIndex)}
+            onpointercancel={(event) => handleChildPointerCancel(event, child)}
             onkeydown={(event) => handleChildKeyDown(event, child, childType)}
           >
             <!-- Child device rectangle -->
             <rect
               class="child-device-rect"
+              data-testid="container-child-drag-surface"
               x={2}
               y={1}
               width={childWidth - 4}
@@ -1005,6 +1179,24 @@
     stroke-width: 1;
     /* Safari 18.x fix #411: cursor on rect element for proper hit area */
     cursor: grab;
+  }
+
+  .container-child {
+    cursor: grab;
+  }
+
+  .container-child.dragging {
+    cursor: grabbing;
+    opacity: 0.65;
+  }
+
+  .container-child:focus-visible {
+    outline: none;
+  }
+
+  .container-child:focus-visible .child-device-rect {
+    stroke: var(--colour-selection);
+    stroke-width: 2;
   }
 
   .rack-device:active .device-rect,

@@ -72,7 +72,8 @@ export function handleDragOver(
     dragData.sourceRackId === rack.id &&
     dragData.sourceIndex !== undefined;
 
-  event.dataTransfer.dropEffect = isInternalMove ? "move" : "copy";
+  event.dataTransfer.dropEffect =
+    dragData.type === "rack-device" ? "move" : "copy";
 
   const svg = event.currentTarget as SVGSVGElement;
   const excludeIndex = isInternalMove ? dragData.sourceIndex : undefined;
@@ -165,24 +166,26 @@ export function handleDrop(event: DragEvent, ctx: RackHandlerContext): void {
 
   // Container drops need special handling for source removal and fallback
   if (action.kind === "container-drop") {
-    const success = ctx.layoutStore.placeInContainer(
-      action.rackId,
-      action.slug,
-      action.containerTarget.containerId,
-      action.containerTarget.slotId,
-      action.containerTarget.position,
-    );
+    const success =
+      action.dragData.type === "rack-device" &&
+      action.dragData.sourceRackId &&
+      action.dragData.sourceIndex !== undefined
+        ? ctx.layoutStore.moveDeviceIntoContainer(
+            action.dragData.sourceRackId,
+            action.dragData.sourceIndex,
+            action.rackId,
+            action.containerTarget.containerId,
+            action.containerTarget.slotId,
+            action.containerTarget.position,
+          )
+        : ctx.layoutStore.placeInContainer(
+            action.rackId,
+            action.slug,
+            action.containerTarget.containerId,
+            action.containerTarget.slotId,
+            action.containerTarget.position,
+          );
     if (success) {
-      if (
-        action.dragData.type === "rack-device" &&
-        action.dragData.sourceRackId &&
-        action.dragData.sourceIndex !== undefined
-      ) {
-        ctx.layoutStore.removeDeviceFromRack(
-          action.dragData.sourceRackId,
-          action.dragData.sourceIndex,
-        );
-      }
       return;
     }
     // Container placement failed — fall through to rack-level via re-resolve

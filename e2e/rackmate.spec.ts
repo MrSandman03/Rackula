@@ -82,6 +82,44 @@ test.describe("RackMate workflow", () => {
     ).toContainText("USB-C power plug bend clearance");
   });
 
+  test("occupied carrier deletion discloses children and respects cancel", async ({
+    page,
+  }) => {
+    await openRackMateStarter(page);
+    const carrier = page.locator(
+      '[data-testid="rack-device"][data-device-uuid="dev-ucg-tray-u1"]',
+    );
+    const carrierButton = carrier.locator(":scope > .device-rect");
+    await carrierButton.click();
+    await page.keyboard.press("Delete");
+
+    const confirm = page.getByRole("dialog", { name: "Remove Device" });
+    await expect(confirm).toContainText(/and 1 mounted device from this rack/);
+    await confirm.getByRole("button", { name: "Cancel" }).click();
+    await expect(confirm).toHaveCount(0);
+    await expect(page.getByTestId("dialog-backdrop")).toHaveCount(0);
+    await expect(carrier).toBeVisible();
+
+    const carrierBox = await carrierButton.boundingBox();
+    expect(carrierBox).not.toBeNull();
+    await carrier.dispatchEvent("contextmenu", {
+      bubbles: true,
+      button: 2,
+      clientX: carrierBox!.x + carrierBox!.width / 2,
+      clientY: carrierBox!.y + carrierBox!.height / 2,
+    });
+    const deleteMenuItem = page
+      .getByTestId("ctx-menu")
+      .getByRole("menuitem", { name: /Delete/ });
+    await expect(deleteMenuItem).toBeVisible();
+    await deleteMenuItem.dispatchEvent("click");
+    await page
+      .getByRole("dialog", { name: "Remove Device" })
+      .getByRole("button", { name: "Remove 2 devices" })
+      .click();
+    await expect(carrier).toHaveCount(0);
+  });
+
   test("command-palette device search exposes RackMate fit metadata", async ({
     page,
   }) => {
@@ -196,10 +234,15 @@ test.describe("RackMate workflow", () => {
 
     const pin = row.getByTestId("favourite-device-btn");
     await expect(pin).toBeVisible();
-    const pinBounds = await pin.boundingBox();
-    expect(pinBounds).not.toBeNull();
-    expect(pinBounds!.width).toBeGreaterThanOrEqual(44);
-    expect(pinBounds!.height).toBeGreaterThanOrEqual(44);
+    // The virtualized row can be replaced once after search settles. Poll the
+    // live locator so a transiently detached node cannot turn this size check
+    // into a full-suite-only flake.
+    await expect
+      .poll(async () => (await pin.boundingBox())?.width ?? 0)
+      .toBeGreaterThanOrEqual(44);
+    await expect
+      .poll(async () => (await pin.boundingBox())?.height ?? 0)
+      .toBeGreaterThanOrEqual(44);
 
     await marker.click();
     const fitDetails = page.getByTestId("fit-detail-popover");

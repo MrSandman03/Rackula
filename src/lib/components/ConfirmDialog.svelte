@@ -4,7 +4,6 @@
 -->
 <script lang="ts">
   import Dialog from "./Dialog.svelte";
-  import { onMount } from "svelte";
 
   interface Props {
     open: boolean;
@@ -35,23 +34,6 @@
   function handleCancel() {
     oncancel?.();
   }
-
-  // Handle keyboard shortcuts
-  function handleKeyDown(event: KeyboardEvent) {
-    if (!open) return;
-
-    if (event.key === "Enter") {
-      event.preventDefault();
-      handleConfirm();
-    }
-  }
-
-  onMount(() => {
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  });
 </script>
 
 <Dialog {open} {title} onclose={handleCancel} size="S">

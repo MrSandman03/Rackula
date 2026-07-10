@@ -19,6 +19,7 @@ import {
   allowsFractionalRailPosition,
   canMoveRackAssemblyToRack,
   findCollisions,
+  getProspectiveRackAfterDeviceMove,
   resolveSynthesizedCarrierPlacement,
   synthesizeCarrierForDevice,
   requiresChassisBay,
@@ -27,7 +28,7 @@ import { findDeviceType } from "$lib/utils/device-lookup";
 import { getDeviceDisplayName } from "$lib/utils/device";
 import { screenToSVG } from "$lib/utils/coordinates";
 import { getMountRecommendation } from "$lib/utils/mount-recommendations";
-import { toInternalUnits } from "$lib/utils/position";
+import { toHumanUnits, toInternalUnits } from "$lib/utils/position";
 
 /** Pixel-based measurements of a rack, used by the drop calculation pipeline. */
 export interface RackDimensions {
@@ -207,8 +208,18 @@ export function resolveDropTarget(
   assemblySource?: RackAssemblyDragSource,
 ): DropTargetResult {
   const { mouseY, xOffsetInRack } = resolveCoordinates(coords, dims);
+  const excludeDeviceId =
+    excludeIndex === undefined ? undefined : rack.devices[excludeIndex]?.id;
+  const movingDevice =
+    excludeIndex === undefined ? undefined : rack.devices[excludeIndex];
+  const railValidationRack =
+    movingDevice?.container_id && excludeDeviceId
+      ? getProspectiveRackAfterDeviceMove(rack, excludeDeviceId)
+      : rack;
+  const railExcludeIndex =
+    railValidationRack === rack ? excludeIndex : undefined;
 
-  const targetU = calculateRailDropPosition(mouseY, dims, rack, device);
+  let targetU = calculateRailDropPosition(mouseY, dims, rack, device);
 
   const containerHover = detectContainerHover(
     rack,
@@ -220,6 +231,7 @@ export function resolveDropTarget(
     dims.rackHeight,
     dims.uHeight,
     faceFilter,
+    excludeDeviceId,
   );
 
   // Carrier-first: a sub-U / half-width device (including a chassis child) never
@@ -234,48 +246,64 @@ export function resolveDropTarget(
   const needsBay = requiresChassisBay(device, rack.width);
   // Both a carrier-synthesising device and a bay-only device can drop into an
   // existing container cell under the cursor.
-  const resolvableContainerTarget =
-    carrierSlug !== null || needsBay
-      ? detectContainerDropTarget(
-          rack,
-          deviceLibrary,
-          device,
-          mouseY,
-          xOffsetInRack,
-          dims.rackWidth,
-          dims.rackHeight,
-          dims.uHeight,
-          faceFilter,
-        )
-      : null;
+  const resolvableContainerTarget = detectContainerDropTarget(
+    rack,
+    deviceLibrary,
+    device,
+    mouseY,
+    xOffsetInRack,
+    dims.rackWidth,
+    dims.rackHeight,
+    dims.uHeight,
+    faceFilter,
+    excludeDeviceId,
+  );
+  const resolvedContainerId =
+    resolvableContainerTarget?.containerId ?? containerHover?.containerId;
+  const resolvedContainer = resolvedContainerId
+    ? rack.devices.find((placed) => placed.id === resolvedContainerId)
+    : undefined;
+  if (resolvedContainer) {
+    targetU = toHumanUnits(resolvedContainer.position);
+  }
 
   let feedback: DropFeedback;
   let previewHeight = device.u_height;
   if (resolvableContainerTarget) {
     feedback = "valid";
+    previewHeight = resolvedContainer
+      ? (findDeviceType(resolvedContainer.device_type, deviceLibrary)
+          ?.u_height ?? device.u_height)
+      : device.u_height;
+  } else if (containerHover) {
+    feedback = "blocked";
+    previewHeight = resolvedContainer
+      ? (findDeviceType(resolvedContainer.device_type, deviceLibrary)
+          ?.u_height ?? device.u_height)
+      : device.u_height;
   } else if (carrierSlug) {
     // Synthesise a rail carrier at this U and validate the complete assembly.
     const carrierType = findDeviceType(carrierSlug, deviceLibrary);
     const carrierHeight = carrierType?.u_height ?? 1;
     previewHeight = carrierHeight;
     const carrierFeedback = getDropFeedback(
-      rack,
+      railValidationRack,
       deviceLibrary,
       carrierHeight,
       targetU,
-      excludeIndex,
+      railExcludeIndex,
       "both",
       carrierType,
     );
     const carrierPlacement =
       carrierFeedback === "valid" && carrierType
         ? resolveSynthesizedCarrierPlacement(
-            rack,
+            railValidationRack,
             deviceLibrary,
             device,
             carrierType,
             toInternalUnits(targetU),
-            excludeIndex,
+            railExcludeIndex,
           )
         : null;
     feedback =
@@ -287,11 +315,11 @@ export function resolveDropTarget(
     feedback = "invalid";
   } else {
     feedback = getDropFeedback(
-      rack,
+      railValidationRack,
       deviceLibrary,
       device.u_height,
       targetU,
-      excludeIndex,
+      railExcludeIndex,
       faceFilter,
       device,
     );
@@ -355,6 +383,17 @@ export function resolveDropAction(
 
   // Carrier-first: a sub-U / half-width device must land inside a carrier.
   const carrierSlug = synthesizeCarrierForDevice(dragData.device, rack.width);
+  const excludeIndex = deriveExcludeIndex(dragData, rack.id);
+  const excludeDeviceId =
+    excludeIndex === undefined ? undefined : rack.devices[excludeIndex]?.id;
+  const movingDevice =
+    excludeIndex === undefined ? undefined : rack.devices[excludeIndex];
+  const railValidationRack =
+    movingDevice?.container_id && excludeDeviceId
+      ? getProspectiveRackAfterDeviceMove(rack, excludeDeviceId)
+      : rack;
+  const railExcludeIndex =
+    railValidationRack === rack ? excludeIndex : undefined;
 
   // Drop into the cell under the cursor when hovering a container with a free,
   // fitting cell (y-aware: both column and row). Skipped on the failed-container
@@ -370,6 +409,7 @@ export function resolveDropAction(
       dims.rackHeight,
       dims.uHeight,
       faceFilter,
+      excludeDeviceId,
     );
 
     if (containerTarget) {
@@ -381,9 +421,37 @@ export function resolveDropAction(
         dragData,
       };
     }
-  }
 
-  const excludeIndex = deriveExcludeIndex(dragData, rack.id);
+    const containerHover = detectContainerHover(
+      rack,
+      deviceLibrary,
+      dragData.device,
+      mouseY,
+      xOffsetInRack,
+      dims.rackWidth,
+      dims.rackHeight,
+      dims.uHeight,
+      faceFilter,
+      excludeDeviceId,
+    );
+    if (containerHover) {
+      const container = rack.devices.find(
+        (placed) => placed.id === containerHover.containerId,
+      );
+      const containerType = container
+        ? findDeviceType(container.device_type, deviceLibrary)
+        : undefined;
+      return {
+        kind: "invalid",
+        feedback: "blocked",
+        targetU,
+        deviceHeight: containerType?.u_height ?? dragData.device.u_height,
+        excludeIndex,
+        deviceType: dragData.device,
+        message: "Device doesn't fit in this carrier slot",
+      };
+    }
+  }
   const isInternalMove =
     dragData.type === "rack-device" &&
     dragData.sourceRackId === rack.id &&
@@ -400,11 +468,11 @@ export function resolveDropAction(
     const carrierType = findDeviceType(carrierSlug, deviceLibrary);
     const carrierHeight = carrierType?.u_height ?? 1;
     const carrierFeedback = getDropFeedback(
-      rack,
+      railValidationRack,
       deviceLibrary,
       carrierHeight,
       targetU,
-      excludeIndex,
+      railExcludeIndex,
       "both",
       carrierType,
     );
@@ -420,12 +488,12 @@ export function resolveDropAction(
     }
     const carrierPlacement = carrierType
       ? resolveSynthesizedCarrierPlacement(
-          rack,
+          railValidationRack,
           deviceLibrary,
           dragData.device,
           carrierType,
           toInternalUnits(targetU),
-          excludeIndex,
+          railExcludeIndex,
         )
       : null;
     if (!carrierPlacement) {
@@ -471,11 +539,11 @@ export function resolveDropAction(
   }
 
   const feedback = getDropFeedback(
-    rack,
+    railValidationRack,
     deviceLibrary,
     dragData.device.u_height,
     targetU,
-    excludeIndex,
+    railExcludeIndex,
     faceFilter,
     dragData.device,
   );

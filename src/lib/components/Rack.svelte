@@ -28,10 +28,7 @@
   import RackDropZone from "./RackDropZone.svelte";
   import RackChristmasHat from "./RackChristmasHat.svelte";
   import DeviceContextMenu from "./DeviceContextMenu.svelte";
-  import {
-    getDropFeedback,
-    type ContainerHoverInfo,
-  } from "$lib/utils/dragdrop";
+  import { type ContainerHoverInfo } from "$lib/utils/dragdrop";
   import { getToastStore } from "$lib/stores/toast.svelte";
   import { getLayoutStore } from "$lib/stores/layout.svelte";
   import { getSelectionStore } from "$lib/stores/selection.svelte";
@@ -40,7 +37,10 @@
   import { isChristmas } from "$lib/utils/christmas";
   import { getViewportStore } from "$lib/utils/viewport.svelte";
   import { getPlacementStore } from "$lib/stores/placement.svelte";
-  import { validStartPositions } from "$lib/utils/placement-keyboard";
+  import {
+    keyboardPlacementPreview,
+    validStartPositions,
+  } from "$lib/utils/placement-keyboard";
   import { SvelteSet, SvelteMap } from "svelte/reactivity";
   import { fade } from "svelte/transition";
   import { prefersReducedMotion } from "svelte/motion";
@@ -290,7 +290,6 @@
     if (!isPlacementMode || !placementStore.pendingDevice)
       return new SvelteSet<number>();
     const device = placementStore.pendingDevice;
-    const deviceHeight = device.u_height;
     // Reuse the keyboard cursor's valid-start scan so the highlight and the
     // keyboard cursor agree by construction; expand each valid start into the
     // U-slots the device would occupy.
@@ -301,7 +300,14 @@
       device,
       effectiveFaceFilter,
     )) {
-      for (let u = startU; u < startU + deviceHeight; u++) validSlots.add(u);
+      const preview = keyboardPlacementPreview(
+        rack,
+        deviceLibrary,
+        device,
+        startU,
+        effectiveFaceFilter,
+      );
+      for (let u = startU; u < startU + preview.height; u++) validSlots.add(u);
     }
     return validSlots;
   });
@@ -321,19 +327,17 @@
     if (effectiveFaceFilter !== placementStore.targetFace) return null;
     const position = placementStore.cursorPosition;
     if (position == null) return null;
-    const { u_height: deviceHeight } = placementStore.pendingDevice;
+    const preview = keyboardPlacementPreview(
+      rack,
+      deviceLibrary,
+      placementStore.pendingDevice,
+      position,
+      effectiveFaceFilter,
+    );
     return {
       position,
-      height: deviceHeight,
-      feedback: getDropFeedback(
-        rack,
-        deviceLibrary,
-        deviceHeight,
-        position,
-        undefined,
-        effectiveFaceFilter,
-        placementStore.pendingDevice,
-      ),
+      height: preview.height,
+      feedback: preview.feedback,
     };
   });
 
@@ -386,6 +390,12 @@
       justFinishedDrag = false;
       dragDebounceTimeout = null;
     }, DRAG_CLICK_DEBOUNCE_MS);
+  }
+
+  function finishDeviceDrag() {
+    setDropPreviewIfChanged(null);
+    containerHoverInfo = null;
+    setDragFinished();
   }
 
   // --- Custom pointer drag listeners (Safari #397 fix) ---
@@ -555,7 +565,7 @@
               isDragTargetValid={isHoveredContainer &&
                 (containerHoverInfo?.isValidTarget ?? false)}
               onselect={ondeviceselect}
-              ondragend={() => setDragFinished()}
+              ondragend={finishDeviceDrag}
               onduplicate={(e) =>
                 contextActions.handleDuplicate(rack, {
                   ...e.detail,
