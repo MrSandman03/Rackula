@@ -19,25 +19,10 @@
   import LogoLoader from "./LogoLoader.svelte";
   import Shimmer from "./Shimmer.svelte";
   import Checkbox from "./Checkbox.svelte";
+  import ExportRackSelection from "./ExportRackSelection.svelte";
+  import type { SelectableExportItem } from "./export-dialog.types";
   import { generateExportSVG, generateExportFilename } from "$lib/utils/export";
   import { SvelteSet } from "svelte/reactivity";
-
-  /**
-   * Represents a selectable item in the export dialog.
-   * Can be either a standalone rack or a bayed rack group.
-   */
-  interface SelectableItem {
-    /** Unique identifier (rack ID for standalone, group ID for groups) */
-    id: string;
-    /** Display name */
-    name: string;
-    /** Height display (e.g., "42U" or "42U × 3-bay") */
-    heightDisplay: string;
-    /** All rack IDs included in this item */
-    rackIds: string[];
-    /** Whether this is a bayed group */
-    isBayedGroup: boolean;
-  }
 
   interface Props {
     open: boolean;
@@ -96,8 +81,8 @@
   let previewIndex = $state(0);
 
   // Build selectable items: consolidate bayed groups, keep standalone racks separate
-  const selectableItems = $derived.by((): SelectableItem[] => {
-    const items: SelectableItem[] = [];
+  const selectableItems = $derived.by((): SelectableExportItem[] => {
+    const items: SelectableExportItem[] = [];
     const racksInGroups = new SvelteSet<string>();
 
     // Get bayed groups only (layout_preset === 'bayed')
@@ -181,24 +166,6 @@
   // Computed: Selected racks array (ordered by position)
   const selectedRacksArray = $derived(
     racks.filter((r) => selectedRacks.has(r.id)),
-  );
-
-  // Check if a selectable item is fully selected (all its racks are selected)
-  function isItemSelected(item: SelectableItem): boolean {
-    return item.rackIds.every((id) => selectedRacks.has(id));
-  }
-
-  // Check if a selectable item is partially selected (some but not all racks selected)
-  function isItemPartiallySelected(item: SelectableItem): boolean {
-    const selectedCount = item.rackIds.filter((id) =>
-      selectedRacks.has(id),
-    ).length;
-    return selectedCount > 0 && selectedCount < item.rackIds.length;
-  }
-
-  // Count of selected items (for select all/deselect all button state)
-  const selectedItemsCount = $derived(
-    selectableItems.filter((item) => isItemSelected(item)).length,
   );
 
   // Computed: Will export as multi-file (ZIP for images, multi-page for PDF)
@@ -339,18 +306,10 @@
     }
   }
 
-  // Selectable item toggle - toggles all racks in the item
-  function toggleItem(item: SelectableItem) {
-    if (isItemSelected(item)) {
-      // Deselect all racks in this item
-      for (const rackId of item.rackIds) {
-        selectedRacks.delete(rackId);
-      }
-    } else {
-      // Select all racks in this item
-      for (const rackId of item.rackIds) {
-        selectedRacks.add(rackId);
-      }
+  function setItemSelected(item: SelectableExportItem, selected: boolean) {
+    for (const rackId of item.rackIds) {
+      if (selected) selectedRacks.add(rackId);
+      else selectedRacks.delete(rackId);
     }
   }
 
@@ -410,53 +369,14 @@
     {:else}
       <!-- Rack Selection (for 2+ selectable items) -->
       {#if showRackSelection}
-        <div class="form-group rack-selection">
-          <div class="rack-selection-header">
-            <span class="section-label">Racks</span>
-            <div class="rack-selection-actions">
-              <button
-                type="button"
-                class="btn-link"
-                onclick={selectAllItems}
-                disabled={selectedItemsCount === selectableItems.length}
-              >
-                Select All
-              </button>
-              <span class="separator">|</span>
-              <button
-                type="button"
-                class="btn-link"
-                onclick={deselectAllItems}
-                disabled={selectedRacks.size === 0}
-              >
-                Deselect All
-              </button>
-            </div>
-          </div>
-          <!-- Native checkbox used here for indeterminate state support on bayed groups -->
-          <div class="rack-checklist">
-            {#each selectableItems as item (item.id)}
-              <label class="rack-item" class:bayed-group={item.isBayedGroup}>
-                <input
-                  type="checkbox"
-                  checked={isItemSelected(item)}
-                  indeterminate={isItemPartiallySelected(item)}
-                  onchange={() => toggleItem(item)}
-                />
-                <span class="rack-name">{item.name}</span>
-                <span class="rack-height">{item.heightDisplay}</span>
-              </label>
-            {/each}
-          </div>
-        </div>
-
-        <!-- Multi-file export info message -->
-        {#if multiFileMessage}
-          <div class="info-message">
-            <span class="info-icon">ℹ️</span>
-            <span>{multiFileMessage}</span>
-          </div>
-        {/if}
+        <ExportRackSelection
+          items={selectableItems}
+          selectedRackIds={selectedRacks}
+          message={multiFileMessage}
+          onitemtoggle={setItemSelected}
+          onselectall={selectAllItems}
+          ondeselectall={deselectAllItems}
+        />
       {/if}
 
       <div class="form-group">
@@ -660,129 +580,6 @@
     line-height: 1.5;
     margin: 0;
     padding: var(--space-2) 0;
-  }
-
-  /* Rack Selection */
-  .rack-selection {
-    gap: var(--space-2);
-  }
-
-  .rack-selection-header {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--space-2);
-  }
-
-  .section-label {
-    font-size: var(--font-size-base);
-    font-weight: var(--font-weight-medium);
-    color: var(--colour-text);
-  }
-
-  .rack-selection-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    align-items: center;
-  }
-
-  .btn-link {
-    background: none;
-    border: none;
-    color: var(--colour-selection);
-    font-size: var(--font-size-sm);
-    cursor: pointer;
-    padding: 0;
-  }
-
-  .btn-link:hover:not(:disabled) {
-    text-decoration: underline;
-  }
-
-  .btn-link:disabled {
-    color: var(--colour-text-muted);
-    cursor: not-allowed;
-  }
-
-  .separator {
-    color: var(--colour-text-muted);
-  }
-
-  .rack-checklist {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    max-height: 120px;
-    overflow-y: auto;
-    border: 1px solid var(--colour-border);
-    border-radius: var(--radius-sm);
-    padding: var(--space-2);
-  }
-
-  .rack-item {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    cursor: pointer;
-    padding: var(--space-1);
-    border-radius: var(--radius-sm);
-    font-weight: var(--font-weight-normal);
-  }
-
-  .rack-item:hover {
-    background: var(--colour-surface-hover);
-  }
-
-  .rack-item input[type="checkbox"] {
-    width: var(--space-4);
-    height: var(--space-4);
-    accent-color: var(--colour-selection);
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-
-  .rack-name {
-    flex: 1;
-    font-size: var(--font-size-sm);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .rack-height {
-    font-size: var(--font-size-xs);
-    color: var(--colour-text-muted);
-    flex-shrink: 0;
-  }
-
-  /* Bayed group indicator */
-  .rack-item.bayed-group .rack-name::before {
-    content: "";
-    display: inline-block;
-    width: var(--space-1-5);
-    height: var(--space-1-5);
-    background: var(--colour-selection);
-    border-radius: 50%;
-    margin-right: var(--space-1-5);
-    vertical-align: middle;
-  }
-
-  /* Info message */
-  .info-message {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    background: var(--colour-surface-hover);
-    border-radius: var(--radius-sm);
-    font-size: var(--font-size-sm);
-    color: var(--colour-text);
-  }
-
-  .info-icon {
-    flex-shrink: 0;
   }
 
   .preview-section {

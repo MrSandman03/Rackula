@@ -215,17 +215,6 @@ async function fetchDeviceYaml(
   }
 }
 
-function slugToVarName(slug: string): string {
-  // Convert slug to camelCase variable name
-  // ubiquiti-usw-pro-24 -> ubiquitiUswPro24
-  return slug
-    .split("-")
-    .map((part, i) =>
-      i === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1),
-    )
-    .join("");
-}
-
 function inferCategory(device: NetBoxDevice): string {
   const model = device.model.toLowerCase();
   const slug = device.slug.toLowerCase();
@@ -442,43 +431,21 @@ async function main(): Promise<void> {
     });
     console.log(`];`);
 
-    // Generate bundledImages.ts entries
+    // Report images that the bundled-images generator will discover.
     const devicesWithImages = importedDevices.filter(
       (d) => d.front_image || d.rear_image,
     );
     if (devicesWithImages.length > 0) {
-      console.log(`\n📸 Add to bundledImages.ts:\n`);
-      console.log(`// Imports:`);
-      const vendorLower = options.vendor.toLowerCase();
-      devicesWithImages.forEach((device) => {
-        const varBase = slugToVarName(device.slug);
-        if (device.front_image) {
-          console.log(
-            `import ${varBase}Front from '$lib/assets/device-images/${vendorLower}/${device.slug}.front.webp';`,
-          );
-        }
-        if (device.rear_image) {
-          console.log(
-            `import ${varBase}Rear from '$lib/assets/device-images/${vendorLower}/${device.slug}.rear.webp';`,
-          );
-        }
-      });
-
-      console.log(`\n// Manifest entries:`);
-      devicesWithImages.forEach((device) => {
-        const varBase = slugToVarName(device.slug);
-        const parts = [];
-        if (device.front_image) parts.push(`front: ${varBase}Front`);
-        if (device.rear_image) parts.push(`rear: ${varBase}Rear`);
-        console.log(`'${device.slug}': { ${parts.join(", ")} },`);
-      });
+      console.log(
+        `\n📸 ${devicesWithImages.length} device image set(s) will be discovered by npm run generate-bundled-images.`,
+      );
     }
   }
 
   if (!options.dryRun) {
     console.log(`\n📋 Next steps:`);
     console.log(`1. Run: npm run process-images`);
-    console.log(`2. Update src/lib/data/bundledImages.ts with new imports`);
+    console.log(`2. Run: npm run generate-bundled-images`);
     console.log(`3. Add devices to brand pack file if not already present`);
   }
 }

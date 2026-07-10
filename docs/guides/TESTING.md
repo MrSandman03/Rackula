@@ -553,6 +553,16 @@ Update flow for an intentional visual change:
 
 Dynamic regions (the app version string and "last saved" timestamps) are masked so they never trip the diff.
 
+### File Length Gate
+
+Tracked code and test files must not exceed 1,000 physical lines. The hosted `validate` job runs the same check available locally:
+
+```bash
+npm run check:file-lengths
+```
+
+When the gate fails, split the file along cohesive responsibilities while preserving its tests, public contracts, and generated output. Do not shorten a file by deleting coverage or compressing readable code.
+
 ### Performance Budget
 
 `scripts/check-bundle-budget.ts` is a guard rail for the UX overhaul (epic #2017, issue #2185): the shell rework adds UI surface (side panel, tab strip, the dialog system, command and app menus), and this gate keeps the initial-load bundle from regressing as those slices land. It is the performance counterpart to the visual-regression and axe-core guard rails.

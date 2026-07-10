@@ -28,7 +28,10 @@
  */
 
 import type { Layout } from "$lib/types";
-import { createLayoutStore, type LayoutStore } from "./layout.svelte";
+import {
+  createLayoutStore,
+  type LayoutStore,
+} from "./layout/store-instance.svelte";
 import { createHistoryStore, getHistoryStore } from "./history.svelte";
 import { createLayout } from "$lib/utils/serialization";
 

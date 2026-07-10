@@ -20,7 +20,6 @@ import {
   createUpdateRackCommand,
   createBatchCommand,
   type Command,
-  type RackGroupCommandStore,
 } from "../commands";
 import {
   getRackLifecycleCommandAdapter,
@@ -34,6 +33,22 @@ import {
   type RackPositionAssignment,
 } from "$lib/utils/rack-row";
 import type { LayoutStateAccess } from "./types";
+import {
+  getRackGroupCommandAdapter,
+  getRackGroupById,
+  getRackGroupForRack,
+  validateBayedGroupHeights,
+} from "./rack-group-state";
+
+export {
+  createRackGroupRaw,
+  updateRackGroupRaw,
+  deleteRackGroupRaw,
+  getRackGroupCommandAdapter,
+  getRackGroupById,
+  getRackGroupForRack,
+  validateBayedGroupHeights,
+} from "./rack-group-state";
 
 function createBayRackFromSource(source: Rack, name: string, id: string): Rack {
   const validWidths: Rack["width"][] = [10, 19, 21, 23];
@@ -58,150 +73,6 @@ function createBayRackFromSource(source: Rack, name: string, id: string): Rack {
     rack.depth_mm = source.depth_mm;
   }
   return rack;
-}
-
-// =============================================================================
-// Raw Mutators (for undo/redo system — bypass history)
-// =============================================================================
-
-/**
- * Raw create rack group (bypasses history)
- * @param ctx - Layout state access
- * @param group - Group to create
- */
-export function createRackGroupRaw(
-  ctx: LayoutStateAccess,
-  group: RackGroup,
-): void {
-  const layout = ctx.getLayout();
-  const newGroups = [...(layout.rack_groups ?? []), group];
-  ctx.setLayout({
-    ...layout,
-    rack_groups: newGroups,
-  });
-}
-
-/**
- * Raw update rack group (bypasses history)
- * @param ctx - Layout state access
- * @param id - Group ID
- * @param updates - Properties to update
- */
-export function updateRackGroupRaw(
-  ctx: LayoutStateAccess,
-  id: string,
-  updates: Partial<RackGroup>,
-): void {
-  const layout = ctx.getLayout();
-  const newGroups = (layout.rack_groups ?? []).map((g) =>
-    g.id === id ? { ...g, ...updates } : g,
-  );
-  ctx.setLayout({
-    ...layout,
-    rack_groups: newGroups,
-  });
-}
-
-/**
- * Raw delete rack group (bypasses history)
- * @param ctx - Layout state access
- * @param id - Group ID
- * @returns The deleted group or undefined
- */
-export function deleteRackGroupRaw(
-  ctx: LayoutStateAccess,
-  id: string,
-): RackGroup | undefined {
-  const group = getRackGroupById(ctx, id);
-  if (!group) return undefined;
-
-  const layout = ctx.getLayout();
-  const newGroups = (layout.rack_groups ?? []).filter((g) => g.id !== id);
-  ctx.setLayout({
-    ...layout,
-    rack_groups: newGroups.length > 0 ? newGroups : undefined,
-  });
-  return group;
-}
-
-/**
- * Get the command adapter for rack group operations
- * @param ctx - Layout state access
- */
-export function getRackGroupCommandAdapter(
-  ctx: LayoutStateAccess,
-): RackGroupCommandStore {
-  return {
-    createRackGroupRaw: (group: RackGroup) => createRackGroupRaw(ctx, group),
-    updateRackGroupRaw: (id: string, updates: Partial<RackGroup>) =>
-      updateRackGroupRaw(ctx, id, updates),
-    deleteRackGroupRaw: (id: string) => deleteRackGroupRaw(ctx, id),
-  };
-}
-
-// =============================================================================
-// Getters
-// =============================================================================
-
-/**
- * Get a rack group by ID
- * @param ctx - Layout state access
- * @param id - Group ID
- * @returns The group or undefined
- */
-export function getRackGroupById(
-  ctx: LayoutStateAccess,
-  id: string,
-): RackGroup | undefined {
-  return ctx.getRackGroups().find((g) => g.id === id);
-}
-
-/**
- * Get the rack group that contains a specific rack
- * @param ctx - Layout state access
- * @param rackId - Rack ID
- * @returns The group or undefined
- */
-export function getRackGroupForRack(
-  ctx: LayoutStateAccess,
-  rackId: string,
-): RackGroup | undefined {
-  return ctx.getRackGroups().find((g) => g.rack_ids.includes(rackId));
-}
-
-// =============================================================================
-// Validation
-// =============================================================================
-
-/**
- * Validate that all racks in a group have the same height (for bayed preset)
- * @param ctx - Layout state access
- * @param rackIds - Array of rack IDs to validate
- * @returns Error message if validation fails, undefined if valid
- */
-export function validateBayedGroupHeights(
-  ctx: LayoutStateAccess,
-  rackIds: string[],
-): string | undefined {
-  if (rackIds.length <= 1) return undefined;
-
-  const heights = new Set<number>();
-  for (const rackId of rackIds) {
-    const rack = ctx.findRack(rackId);
-    if (rack) {
-      heights.add(rack.height);
-    }
-  }
-
-  if (heights.size > 1) {
-    const heightList = Array.from(heights)
-      .sort((a, b) => a - b)
-      .map((h) => `${h}U`)
-      .join(", ");
-    return `Bayed groups require same-height racks. Found heights: ${heightList}`;
-  }
-
-  return undefined;
 }
 
 // =============================================================================

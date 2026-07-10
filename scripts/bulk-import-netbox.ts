@@ -16,6 +16,14 @@ import { existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import yaml from "js-yaml";
+import { inferCategory } from "./netbox-import/category";
+import type {
+  DeviceCategory,
+  ImportedDevice,
+  ImportStats,
+  NetBoxDevice,
+  VendorConfig,
+} from "./netbox-import/types";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -34,28 +42,6 @@ const ASSETS_SOURCE_DIR = join(ROOT_DIR, "assets-source", "device-images");
 
 // Rate limiting
 const RATE_LIMIT_DELAY = 100; // ms between API calls
-
-// Vendor configurations with category inference hints
-interface VendorConfig {
-  name: string;
-  defaultCategory: DeviceCategory;
-  filter?: (device: NetBoxDevice) => boolean;
-  categoryOverrides?: Record<string, DeviceCategory>;
-}
-
-type DeviceCategory =
-  | "server"
-  | "network"
-  | "patch-panel"
-  | "power"
-  | "storage"
-  | "kvm"
-  | "av-media"
-  | "cooling"
-  | "shelf"
-  | "blank"
-  | "cable-management"
-  | "other";
 
 // Vendors to import, organized by priority
 const VENDORS: VendorConfig[] = [
@@ -218,41 +204,6 @@ const VENDORS: VendorConfig[] = [
   },
 ];
 
-interface NetBoxDevice {
-  manufacturer: string;
-  model: string;
-  slug: string;
-  u_height: number;
-  is_full_depth?: boolean;
-  front_image?: boolean;
-  rear_image?: boolean;
-  airflow?: string;
-  weight?: number;
-  weight_unit?: string;
-  subdevice_role?: string;
-  comments?: string;
-  part_number?: string;
-}
-
-interface ImportedDevice {
-  slug: string;
-  manufacturer: string;
-  model: string;
-  u_height: number;
-  is_full_depth: boolean;
-  category: DeviceCategory;
-  airflow?: string;
-  front_image?: boolean;
-  rear_image?: boolean;
-}
-
-interface ImportStats {
-  vendor: string;
-  total: number;
-  imported: number;
-  skipped: number;
-}
-
 // Sleep function for rate limiting
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -325,54 +276,6 @@ async function fetchDeviceYaml(
   } catch {
     return null;
   }
-}
-
-function inferCategory(
-  device: NetBoxDevice,
-  vendorConfig: VendorConfig,
-): DeviceCategory {
-  const model = device.model.toLowerCase();
-  const slug = device.slug.toLowerCase();
-
-  // Check vendor-specific overrides first
-  if (vendorConfig.categoryOverrides) {
-    for (const [pattern, category] of Object.entries(
-      vendorConfig.categoryOverrides,
-    )) {
-      if (
-        model.includes(pattern.toLowerCase()) ||
-        slug.includes(pattern.toLowerCase())
-      ) {
-        return category;
-      }
-    }
-  }
-
-  // Universal pattern matching
-  if (model.includes("pdu") || slug.includes("pdu")) return "power";
-  if (model.includes("ups") || slug.includes("ups")) return "power";
-  if (model.includes("patch") && model.includes("panel")) return "patch-panel";
-  if (model.includes("switch") || slug.includes("switch")) return "network";
-  if (model.includes("router") || slug.includes("router")) return "network";
-  if (model.includes("firewall")) return "network";
-  if (model.includes("gateway")) return "network";
-  if (
-    model.includes("nas") ||
-    model.includes("diskstation") ||
-    model.includes("rackstation")
-  )
-    return "storage";
-  if (model.includes("powervault") || model.includes("storage"))
-    return "storage";
-  if (model.includes("kvm") || model.includes("console")) return "kvm";
-  if (
-    model.includes("atem") ||
-    model.includes("receiver") ||
-    model.includes("amplifier")
-  )
-    return "av-media";
-
-  return vendorConfig.defaultCategory;
 }
 
 async function downloadImage(url: string, destPath: string): Promise<boolean> {

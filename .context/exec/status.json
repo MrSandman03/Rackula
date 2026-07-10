@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "current_session_id": null,
+  "current_session_id": "exec-20260710-201219-rackula-line-limits",
   "sessions": {
     "20260709-054449-rackmate-agentic-review": {
       "session_path": ".context/exec/sessions/20260709-054449-rackmate-agentic-review",
@@ -43,9 +43,31 @@
       "blockers": [],
       "last_event": "PR #2 merged, post-merge verification passed, the CodeQL finding was fixed, the target lock was released, and the session closed.",
       "last_updated": "2026-07-10T20:01:52Z"
+    },
+    "exec-20260710-201219-rackula-line-limits": {
+      "session_path": ".context/exec/sessions/exec-20260710-201219-rackula-line-limits",
+      "task": "Split all inherited Rackula source and test files above the 1,000-line hard limit",
+      "stage": "pr_open",
+      "current_step": 6,
+      "total_steps": 6,
+      "base_branch": "main",
+      "target_branch": "main",
+      "branch": "fix/legacy-line-limits",
+      "worktree": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
+      "blockers": [],
+      "last_event": "Draft PR #3 opened after exact-head review passed; hosted checks and user merge approval are pending.",
+      "last_updated": "2026-07-10T21:25:14Z"
     }
   },
-  "target_locks": {},
-  "last_updated": "2026-07-10T20:01:52Z",
-  "last_event": "PR #2 merged, post-merge verification passed, the CodeQL finding was fixed, the target lock was released, and the session closed."
+  "target_locks": {
+    "main": {
+      "session_id": "exec-20260710-201219-rackula-line-limits",
+      "stage": "pr_open",
+      "branch": "fix/legacy-line-limits",
+      "since": "2026-07-10T21:23:38Z",
+      "last_updated": "2026-07-10T21:25:14Z"
+    }
+  },
+  "last_updated": "2026-07-10T21:25:14Z",
+  "last_event": "Draft PR #3 opened after exact-head review passed; hosted checks and user merge approval are pending."
 }
