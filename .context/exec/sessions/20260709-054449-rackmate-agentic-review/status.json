@@ -1,0 +1,70 @@
+{
+  "session_id": "20260709-054449-rackmate-agentic-review",
+  "task": "End-to-end RackMate/Rackula bug, feature, QoL, and merge-gate pass",
+  "stage": "done",
+  "session_path": ".context/exec/sessions/20260709-054449-rackmate-agentic-review",
+  "current_step": 5,
+  "total_steps": 5,
+  "base_branch": "main",
+  "target_branch": "main",
+  "branch": "main",
+  "worktree": ".",
+  "pr_url": null,
+  "blockers": [],
+  "steps": {
+    "1": {
+      "description": "Centralize RackMate profile and creation defaults",
+      "status": "done",
+      "retries": 0,
+      "review_verdict": null,
+      "merged_commits": []
+    },
+    "2": {
+      "description": "Repair placement and rendering correctness",
+      "status": "done",
+      "retries": 0,
+      "review_verdict": null,
+      "merged_commits": []
+    },
+    "3": {
+      "description": "Improve RackMate UX and data quality",
+      "status": "done",
+      "retries": 0,
+      "review_verdict": null,
+      "merged_commits": []
+    },
+    "4": {
+      "description": "Add focused coverage and documentation",
+      "status": "done",
+      "retries": 0,
+      "review_verdict": null,
+      "merged_commits": []
+    },
+    "5": {
+      "description": "Verify and complete fork handoff",
+      "status": "done",
+      "retries": 0,
+      "review_verdict": null,
+      "merged_commits": [
+        "949f2b4d",
+        "782947f8",
+        "7e6fedc2",
+        "b974c610",
+        "b71fe97f",
+        "a8d46ba6",
+        "6f70fa79",
+        "5c97573c",
+        "56af21fd"
+      ]
+    }
+  },
+  "config": {
+    "strictness": "standard",
+    "auto_verify": true,
+    "approval_per_step": false,
+    "review_threshold": "major"
+  },
+  "started_at": "2026-07-09T05:44:49Z",
+  "last_updated": "2026-07-09T07:55:36Z",
+  "completed_at": "2026-07-09T07:55:36Z"
+}
