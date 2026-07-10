@@ -254,13 +254,19 @@ describe("Device Commands", () => {
       ];
       const after = [before[0]!, before[3]!];
       const restoreRackDevicesRaw = vi.fn();
-      const addCableRaw = vi.fn();
+      const getCables = vi.fn().mockReturnValue([]);
+      const insertCableRaw = vi.fn();
       const removeCableRaw = vi.fn();
       const command = createRemoveDeviceAssemblyCommand(
         before,
         after,
         [before[1]!, before[2]!],
-        { restoreRackDevicesRaw, addCableRaw, removeCableRaw },
+        {
+          restoreRackDevicesRaw,
+          getCables,
+          insertCableRaw,
+          removeCableRaw,
+        },
         "Carrier",
       );
 

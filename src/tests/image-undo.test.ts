@@ -225,7 +225,10 @@ describe("Image Undo — Device Removal", () => {
       restoreRackDevicesRaw(next: PlacedDevice[]) {
         devices = next;
       },
-      addCableRaw() {},
+      getCables() {
+        return [];
+      },
+      insertCableRaw() {},
       removeCableRaw() {},
     };
     const carrierKey = placementKey(TEST_LAYOUT_ID, carrier.id);

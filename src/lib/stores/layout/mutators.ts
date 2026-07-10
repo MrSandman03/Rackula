@@ -640,6 +640,25 @@ export function addCableRaw(ctx: LayoutStateAccess, cable: Cable): void {
   });
 }
 
+/** Insert a cable at a specific array index without recording history. */
+export function insertCableRaw(
+  ctx: LayoutStateAccess,
+  cable: Cable,
+  index: number,
+): void {
+  const layout = ctx.getLayout();
+  const cables = layout.cables ?? [];
+  const insertionIndex = Math.max(0, Math.min(index, cables.length));
+  ctx.setLayout({
+    ...layout,
+    cables: [
+      ...cables.slice(0, insertionIndex),
+      cable,
+      ...cables.slice(insertionIndex),
+    ],
+  });
+}
+
 /**
  * Update a cable directly (raw)
  * @param ctx - Layout state access

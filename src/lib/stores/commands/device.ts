@@ -222,7 +222,8 @@ export type DeviceAssemblyCommandStore = Pick<
   RackCommandStore,
   "restoreRackDevicesRaw"
 > & {
-  addCableRaw(cable: Cable): void;
+  getCables(): readonly Cable[];
+  insertCableRaw(cable: Cable, index: number): void;
   removeCableRaw(id: string): void;
 };
 
@@ -462,12 +463,27 @@ export function createRemoveDeviceAssemblyCommand(
   const removedCopies = structuredClone(removedDevices);
   const beforeCableCopy = structuredClone(beforeCables);
   const removedDeviceIds = new Set(removedCopies.map((device) => device.id));
-  const afterCableCopy = beforeCableCopy.filter(
-    (cable) =>
-      !removedDeviceIds.has(cable.a_device_id) &&
-      !removedDeviceIds.has(cable.b_device_id),
+  type IndexedCable = { cable: Cable; index: number };
+
+  function isAffectedCable(cable: Cable): boolean {
+    return (
+      removedDeviceIds.has(cable.a_device_id) ||
+      removedDeviceIds.has(cable.b_device_id)
+    );
+  }
+
+  function snapshotAffectedCables(cables: readonly Cable[]): IndexedCable[] {
+    return cables.flatMap((cable, index) =>
+      isAffectedCable(cable)
+        ? [{ cable: structuredClone({ ...cable }), index }]
+        : [],
+    );
+  }
+
+  let affectedCableSnapshots = snapshotAffectedCables(beforeCableCopy);
+  let cableOrder = new Map(
+    beforeCableCopy.map((cable, index) => [cable.id, index]),
   );
-  const snapshotCableIds = new Set(beforeCableCopy.map((cable) => cable.id));
   const imageSnapshots = removedCopies.map((device) => {
     const snapshot = getImageStore()
       .getAllImages()
@@ -478,13 +494,31 @@ export function createRemoveDeviceAssemblyCommand(
     };
   });
 
-  function restoreCables(cables: Cable[]): void {
-    // Rebuild the snapshot set so undo restores the original cable ordering.
-    for (const id of snapshotCableIds) {
-      store.removeCableRaw(id);
+  function removeAffectedCables(): void {
+    const currentCables = store.getCables();
+    affectedCableSnapshots = snapshotAffectedCables(currentCables);
+    cableOrder = new Map(
+      currentCables.map((cable, index) => [cable.id, index]),
+    );
+    for (const { cable } of affectedCableSnapshots) {
+      store.removeCableRaw(cable.id);
     }
-    for (const cable of cables) {
-      store.addCableRaw(structuredClone(cable));
+  }
+
+  function restoreAffectedCables(): void {
+    for (const { cable } of affectedCableSnapshots) {
+      store.removeCableRaw(cable.id);
+    }
+    for (const { cable, index } of affectedCableSnapshots) {
+      const currentCables = store.getCables();
+      const nextOriginalCable = currentCables.findIndex((candidate) => {
+        const originalIndex = cableOrder.get(candidate.id);
+        return originalIndex !== undefined && originalIndex > index;
+      });
+      store.insertCableRaw(
+        structuredClone(cable),
+        nextOriginalCable >= 0 ? nextOriginalCable : currentCables.length,
+      );
     }
   }
 
@@ -493,7 +527,7 @@ export function createRemoveDeviceAssemblyCommand(
     description: `Remove ${deviceName}`,
     timestamp: Date.now(),
     execute() {
-      restoreCables(afterCableCopy);
+      removeAffectedCables();
       store.restoreRackDevicesRaw(structuredClone(afterCopy));
       const imageStore = getImageStore();
       for (const device of removedCopies) {
@@ -502,7 +536,7 @@ export function createRemoveDeviceAssemblyCommand(
     },
     undo() {
       store.restoreRackDevicesRaw(structuredClone(beforeCopy));
-      restoreCables(beforeCableCopy);
+      restoreAffectedCables();
       const imageStore = getImageStore();
       for (const snapshot of imageSnapshots) {
         if (snapshot.images?.front) {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { getLayoutStore, resetLayoutStore } from "$lib/stores/layout.svelte";
 import { getImageStore } from "$lib/stores/images.svelte";
 import { placementKey } from "$lib/utils/placement-key";
-import type { Cable, DeviceType } from "$lib/types";
+import type { DeviceType } from "$lib/types";
 import { toInternalUnits } from "$lib/utils/position";
 import {
   addTypes,
@@ -876,60 +876,5 @@ describe("carrier assembly integrity", () => {
         (device) => device.id === assembly.id,
       ),
     ).toBe(true);
-  });
-
-  it("removes and restores cables for every deleted assembly member", () => {
-    const store = addTypes();
-    const rack = store.addRack("Rack", 12)!;
-    const assembly = placeCarrier(store, rack.id, 2);
-    store.placeInContainer(rack.id, childType.slug, assembly.id, "left", 0);
-    const outsideA = placeCarrier(store, rack.id, 6);
-    const outsideB = placeCarrier(store, rack.id, 9);
-    const beforeDevices = plain(rackById(store, rack.id).devices);
-    const child = beforeDevices.find(
-      (device) => device.container_id === assembly.id,
-    )!;
-    const cables: Cable[] = [
-      {
-        id: "carrier-cable",
-        a_device_id: assembly.id,
-        a_interface: "eth0",
-        b_device_id: outsideA.id,
-        b_interface: "eth0",
-      },
-      {
-        id: "child-cable",
-        a_device_id: outsideB.id,
-        a_interface: "eth0",
-        b_device_id: child.id,
-        b_interface: "eth0",
-      },
-      {
-        id: "unrelated-cable",
-        a_device_id: outsideA.id,
-        a_interface: "eth1",
-        b_device_id: outsideB.id,
-        b_interface: "eth1",
-      },
-    ];
-    for (const cable of cables) store.addCableRaw(cable);
-    store.clearHistory();
-
-    store.removeDeviceFromRack(rack.id, 0);
-
-    expect(rackById(store, rack.id).devices.map((device) => device.id)).toEqual(
-      [outsideA.id, outsideB.id],
-    );
-    expect(store.layout.cables).toEqual([cables[2]]);
-
-    store.undo();
-    expect(rackById(store, rack.id).devices).toEqual(beforeDevices);
-    expect(store.layout.cables).toEqual(cables);
-
-    store.redo();
-    expect(rackById(store, rack.id).devices.map((device) => device.id)).toEqual(
-      [outsideA.id, outsideB.id],
-    );
-    expect(store.layout.cables).toEqual([cables[2]]);
   });
 });

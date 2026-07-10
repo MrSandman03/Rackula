@@ -14,6 +14,7 @@
 import { layoutDebug } from "$lib/utils/debug";
 import type {
   DeviceTypeCommandStore,
+  DeviceAssemblyCommandStore,
   DeviceCommandStore,
   RackCommandStore,
 } from "../commands";
@@ -40,6 +41,7 @@ import {
   clearRackDevicesRaw,
   restoreRackDevicesRaw,
   addCableRaw,
+  insertCableRaw,
   removeCableRaw,
 } from "./mutators";
 
@@ -85,7 +87,10 @@ function resolveAdapterRackId(
  */
 export function getCommandStoreAdapter(
   ctx: LayoutStateAccess,
-): DeviceTypeCommandStore & DeviceCommandStore & RackCommandStore {
+): DeviceTypeCommandStore &
+  DeviceAssemblyCommandStore &
+  DeviceCommandStore &
+  RackCommandStore {
   return {
     // DeviceTypeCommandStore
     addDeviceTypeRaw: (deviceType) => addDeviceTypeRaw(ctx, deviceType),
@@ -98,6 +103,8 @@ export function getCommandStoreAdapter(
     setActiveRackId: (id) => ctx.setActiveRackId(id),
     getActiveRackId: () => ctx.getActiveRackId(),
     addCableRaw: (cable) => addCableRaw(ctx, cable),
+    getCables: () => ctx.getLayout().cables ?? [],
+    insertCableRaw: (cable, index) => insertCableRaw(ctx, cable, index),
     removeCableRaw: (id) => removeCableRaw(ctx, id),
 
     // DeviceCommandStore
