@@ -9,7 +9,7 @@
   "target_branch": "main",
   "branch": "fix/legacy-line-limits",
   "worktree": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
-  "pr_url": null,
+  "pr_url": "https://github.com/MrSandman03/Rackula/pull/3",
   "blockers": [],
   "steps": {
     "1": {
@@ -64,7 +64,7 @@
     },
     "6": {
       "description": "Cold-review the exact head, push, and open a draft PR",
-      "status": "reviewing",
+      "status": "done",
       "branch": "fix/legacy-line-limits",
       "worktree_path": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
       "retries": 1,
@@ -80,5 +80,5 @@
     "review_threshold": "major"
   },
   "started_at": "2026-07-10T20:12:19Z",
-  "last_updated": "2026-07-10T21:23:38Z"
+  "last_updated": "2026-07-10T21:25:14Z"
 }

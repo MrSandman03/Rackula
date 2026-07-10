@@ -55,8 +55,8 @@
       "branch": "fix/legacy-line-limits",
       "worktree": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
       "blockers": [],
-      "last_event": "Exact-head review passed at 1169b77f; main target lock acquired for draft PR creation.",
-      "last_updated": "2026-07-10T21:23:38Z"
+      "last_event": "Draft PR #3 opened after exact-head review passed; hosted checks and user merge approval are pending.",
+      "last_updated": "2026-07-10T21:25:14Z"
     }
   },
   "target_locks": {
@@ -65,9 +65,9 @@
       "stage": "pr_open",
       "branch": "fix/legacy-line-limits",
       "since": "2026-07-10T21:23:38Z",
-      "last_updated": "2026-07-10T21:23:38Z"
+      "last_updated": "2026-07-10T21:25:14Z"
     }
   },
-  "last_updated": "2026-07-10T21:23:38Z",
-  "last_event": "Exact-head review passed at 1169b77f; main target lock acquired for draft PR creation."
+  "last_updated": "2026-07-10T21:25:14Z",
+  "last_event": "Draft PR #3 opened after exact-head review passed; hosted checks and user merge approval are pending."
 }

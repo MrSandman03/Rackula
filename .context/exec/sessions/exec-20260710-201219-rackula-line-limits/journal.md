@@ -74,3 +74,9 @@
 - A separate generator/workflow specialist confirmed direct CLI compatibility, side-effect-free imports, pre-replacement validation, drift detection, dry-run behavior, and the five integration-test cases.
 - Residual non-blocking risk is limited to crash/write-failure atomicity after generated-directory removal and trusted injectable paths used only by tests.
 - Acquired the serialized `main` target lock before pushing or opening the draft PR.
+
+## 2026-07-10T21:25:14Z - Draft PR opened
+
+- Pushed `fix/legacy-line-limits` to the fork at reviewed head plus ledger-only review commit `d2a75c9b`.
+- Opened draft PR `https://github.com/MrSandman03/Rackula/pull/3` into fork `main`.
+- No merge has been requested or performed; the `main` target lock remains held while hosted checks run and the PR awaits fresh user approval.
