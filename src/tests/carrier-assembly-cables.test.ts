@@ -154,4 +154,48 @@ describe("carrier assembly cable history", () => {
       cables[3],
     ]);
   });
+
+  it("restores trailing assembly cables before cables added while deleted", () => {
+    const { store, rack, assembly, outsideA, outsideB, cables } =
+      setupCableAssembly();
+    const trailingAssemblyCable: Cable = {
+      id: "trailing-assembly-cable",
+      a_device_id: outsideA.id,
+      a_interface: "eth3",
+      b_device_id: assembly.id,
+      b_interface: "eth3",
+    };
+    const addedWhileDeleted: Cable = {
+      id: "added-while-deleted",
+      a_device_id: outsideA.id,
+      a_interface: "eth4",
+      b_device_id: outsideB.id,
+      b_interface: "eth4",
+    };
+    store.addCableRaw(trailingAssemblyCable);
+
+    store.removeDeviceFromRack(rack.id, 0);
+    store.addCableRaw(addedWhileDeleted);
+
+    store.undo();
+    expect(store.layout.cables).toEqual([
+      ...cables,
+      trailingAssemblyCable,
+      addedWhileDeleted,
+    ]);
+
+    store.redo();
+    expect(store.layout.cables).toEqual([
+      cables[1],
+      cables[3],
+      addedWhileDeleted,
+    ]);
+
+    store.undo();
+    expect(store.layout.cables).toEqual([
+      ...cables,
+      trailingAssemblyCable,
+      addedWhileDeleted,
+    ]);
+  });
 });

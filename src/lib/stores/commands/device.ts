@@ -444,11 +444,7 @@ export function createDuplicateDeviceAssemblyCommand(
   };
 }
 
-/**
- * Remove an occupied carrier as one exact, undoable device-roster transition.
- * Replacing the complete roster preserves the original array indices and
- * parent/child linkage on undo instead of appending restored devices at the end.
- */
+/** Remove an occupied carrier as one exact, undoable roster transition. */
 export function createRemoveDeviceAssemblyCommand(
   beforeDevices: PlacedDevice[],
   afterDevices: PlacedDevice[],
@@ -474,9 +470,7 @@ export function createRemoveDeviceAssemblyCommand(
 
   function snapshotAffectedCables(cables: readonly Cable[]): IndexedCable[] {
     return cables.flatMap((cable, index) =>
-      isAffectedCable(cable)
-        ? [{ cable: structuredClone({ ...cable }), index }]
-        : [],
+      isAffectedCable(cable) ? [{ cable: { ...cable }, index }] : [],
     );
   }
 
@@ -515,9 +509,13 @@ export function createRemoveDeviceAssemblyCommand(
         const originalIndex = cableOrder.get(candidate.id);
         return originalIndex !== undefined && originalIndex > index;
       });
+      const previousOriginalCable = currentCables.findLastIndex((candidate) => {
+        const originalIndex = cableOrder.get(candidate.id);
+        return originalIndex !== undefined && originalIndex < index;
+      });
       store.insertCableRaw(
         structuredClone(cable),
-        nextOriginalCable >= 0 ? nextOriginalCable : currentCables.length,
+        nextOriginalCable >= 0 ? nextOriginalCable : previousOriginalCable + 1,
       );
     }
   }
