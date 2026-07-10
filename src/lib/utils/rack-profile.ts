@@ -25,7 +25,7 @@ export function rackDepthForProfile(
   return depthMm ?? DEFAULT_RACK_DEPTH_MM;
 }
 
-function hasLegacyRackMateSignature(rack: {
+export function hasLegacyRackMateSignature(rack: {
   name?: string;
   width: Rack["width"];
   height: number;
@@ -118,6 +118,11 @@ export function constrainRackProfileUpdates<T extends Partial<Rack>>(
       ? ({ ...updates, profile: "generic" } as T)
       : updates;
   }
+
+  // Non-dimensional edits to an already-constrained RackMate should stay
+  // narrow. Re-injecting its physical dimensions turns a name-only edit into
+  // an apparent height update at the bayed-rack guard and bloats history.
+  if (!touchesProfileDimensions) return updates;
 
   return {
     ...updates,

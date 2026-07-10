@@ -20,6 +20,8 @@
     canResizeRackTo,
     getConflictDetails,
     formatConflictMessage,
+    parseRackHeightInput,
+    RACK_HEIGHT_INPUT_ERROR,
   } from "$lib/utils/rack-resize";
   import {
     COMMON_RACK_HEIGHTS,
@@ -238,10 +240,15 @@
   // Update rack height on input change
   function handleHeightChange(event: Event) {
     const target = event.target as HTMLInputElement;
-    const newHeight = parseInt(target.value, 10);
-    if (newHeight >= 1 && newHeight <= 100) {
-      attemptHeightChange(newHeight);
+    const newHeight = parseRackHeightInput(target.value);
+    if (newHeight === null) {
+      setResizeError("height", RACK_HEIGHT_INPUT_ERROR);
+      rackHeight = selectedRack.height;
+      target.value = String(selectedRack.height);
+      return;
     }
+
+    attemptHeightChange(newHeight);
   }
 
   // Handle preset button click
@@ -419,6 +426,7 @@
       onchange={handleHeightChange}
       min="1"
       max="100"
+      step="1"
       aria-invalid={resizeErrorSource === "height"}
       aria-describedby={resizeErrorSource === "height"
         ? "rack-height-error"

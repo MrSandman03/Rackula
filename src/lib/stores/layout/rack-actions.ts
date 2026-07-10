@@ -615,7 +615,10 @@ export function updateRack(
   const constrainedUpdates = constrainRackProfileUpdates(rack, updates);
 
   // Check if height change on bayed rack
-  if (constrainedUpdates.height !== undefined) {
+  if (
+    constrainedUpdates.height !== undefined &&
+    constrainedUpdates.height !== rack.height
+  ) {
     const group = getRackGroupForRack(ctx, id);
     if (group?.layout_preset === "bayed") {
       layoutDebug.state(

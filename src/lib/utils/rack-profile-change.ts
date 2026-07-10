@@ -4,6 +4,7 @@ import {
   RACKMATE_T1_PLUS_HEIGHT,
 } from "$lib/types/constants";
 import {
+  hasLegacyRackMateSignature,
   isRackMateT1Plus,
   RACKMATE_T1_PLUS_PROFILE,
   RACKMATE_T1_PLUS_WIDTH,
@@ -31,7 +32,9 @@ export function planRackProfileChange(
   const selectRackMate = profile === "rackmate";
   if (
     (selectRackMate && isRackMateT1Plus(rack)) ||
-    (!selectRackMate && rack.profile === "generic")
+    (!selectRackMate &&
+      (rack.profile === "generic" ||
+        (rack.profile === undefined && !hasLegacyRackMateSignature(rack))))
   ) {
     return { kind: "noop" };
   }

@@ -7,6 +7,7 @@ import {
 import { createDefaultRack } from "$lib/utils/serialization";
 import { getLayoutStore, resetLayoutStore } from "$lib/stores/layout.svelte";
 import { resetHistoryStore } from "$lib/stores/history.svelte";
+import { constrainRackProfileUpdates } from "$lib/utils/rack-profile";
 import {
   RACKMATE_T1_PLUS_DEPTH_MM,
   RACKMATE_T1_PLUS_HEIGHT,
@@ -56,6 +57,24 @@ describe("RackMate profile defaults", () => {
     expect(rack.profile).toBe("rackmate-t1-plus");
     expect(rack.height).toBe(RACKMATE_T1_PLUS_HEIGHT);
     expect(rack.depth_mm).toBe(RACKMATE_T1_PLUS_DEPTH_MM);
+  });
+
+  it("does not add redundant dimensions to a RackMate name update", () => {
+    const rack = createDefaultRack(
+      "RackMate",
+      8,
+      10,
+      "4-post-cabinet",
+      false,
+      1,
+      true,
+      "rack-1",
+      "rackmate-t1-plus",
+    );
+
+    expect(
+      constrainRackProfileUpdates(rack, { name: "Renamed RackMate" }),
+    ).toEqual({ name: "Renamed RackMate" });
   });
 
   it("preserves standalone generic 10-inch rack dimensions", () => {
@@ -367,6 +386,49 @@ describe("RackMate profile defaults", () => {
       height: 8,
       depth_mm: 260,
     });
+  });
+
+  it("persists a name-only edit for an explicit RackMate in a bayed group", () => {
+    const store = getLayoutStore();
+    const result = store.addBayedRackGroup("Bayed", 2, 8, 10)!;
+    const rack = result.racks[0];
+    store.updateRackRaw({ profile: "rackmate-t1-plus" }, rack.id);
+    store.clearHistory();
+    store.markClean();
+
+    store.updateRack(rack.id, { name: "Renamed RackMate" });
+
+    expect(store.getRackById(rack.id)).toMatchObject({
+      name: "Renamed RackMate",
+      profile: "rackmate-t1-plus",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+    expect(store.isDirty).toBe(true);
+    expect(store.undo()).toBe(true);
+    expect(store.getRackById(rack.id)?.name).toBe("Bay 1");
+    expect(store.undo()).toBe(false);
+  });
+
+  it("allows a bayed update that repeats an unchanged RackMate height", () => {
+    const store = getLayoutStore();
+    const result = store.addBayedRackGroup("Bayed", 2, 8, 10)!;
+    const rack = result.racks[0];
+    store.updateRackRaw({ profile: "rackmate-t1-plus" }, rack.id);
+    store.clearHistory();
+
+    store.updateRack(rack.id, {
+      name: "Repeated Height RackMate",
+      height: 8,
+    });
+
+    expect(store.getRackById(rack.id)).toMatchObject({
+      name: "Repeated Height RackMate",
+      profile: "rackmate-t1-plus",
+      height: 8,
+    });
+    expect(store.undo()).toBe(true);
   });
 
   it("normalizes whole-rack raw replacement through profile defaults", () => {

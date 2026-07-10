@@ -7,7 +7,7 @@
 
 import type { Rack, DeviceType, PlacedDevice } from "$lib/types";
 import { toHumanUnits } from "./position";
-import { MIN_RACK_HEIGHT } from "$lib/types/constants";
+import { MAX_RACK_HEIGHT, MIN_RACK_HEIGHT } from "$lib/types/constants";
 import { canPlaceDevice, canPlaceInContainer } from "./collision";
 import { findDeviceType } from "./device-lookup";
 import { isDeviceCompatibleWithRackWidth } from "./deviceFilters";
@@ -33,6 +33,25 @@ export interface ResizeValidationResult {
 export interface ConflictInfo {
   device: PlacedDevice;
   deviceType: DeviceType | undefined;
+}
+
+export const RACK_HEIGHT_INPUT_ERROR = `Height must be a whole number between ${MIN_RACK_HEIGHT} and ${MAX_RACK_HEIGHT}U.`;
+
+/** Parse editor input without accepting partial integers such as `12.5`. */
+export function parseRackHeightInput(value: string): number | null {
+  if (value.trim() === "") return null;
+
+  const height = Number(value);
+  if (
+    !Number.isFinite(height) ||
+    !Number.isInteger(height) ||
+    height < MIN_RACK_HEIGHT ||
+    height > MAX_RACK_HEIGHT
+  ) {
+    return null;
+  }
+
+  return height;
 }
 
 /**

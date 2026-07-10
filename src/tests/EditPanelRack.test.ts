@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/svelte";
+import { fireEvent, render, screen } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import EditPanelRack from "$lib/components/EditPanelRack.svelte";
@@ -55,6 +55,23 @@ describe("EditPanelRack RackMate presets", () => {
     expect(screen.getByTestId("btn-preset-depth-1000")).toBeInTheDocument();
     expect(screen.queryByTestId("btn-preset-depth-260")).toBeNull();
     expect(screen.getByLabelText("Depth (mm)")).not.toHaveAttribute("readonly");
+  });
+
+  it("keeps the active Generic profile history-free on an ordinary rack", async () => {
+    const user = userEvent.setup();
+    const layoutStore = getLayoutStore();
+    const rack = createTestRack({ height: 12, width: 10, depth_mm: 400 });
+    layoutStore.loadLayout(createTestLayout({ racks: [rack] }));
+    layoutStore.markClean();
+
+    render(EditPanelRack, {
+      props: { selectedRack: layoutStore.racks[0]!, selectedGroup: null },
+    });
+    await user.click(screen.getByRole("button", { name: "Generic" }));
+
+    expect(layoutStore.racks[0]?.profile).toBeUndefined();
+    expect(layoutStore.isDirty).toBe(false);
+    expect(layoutStore.canUndo).toBe(false);
   });
 
   it("keeps an already-active 10-inch width generic when clicked", async () => {
@@ -331,6 +348,44 @@ describe("EditPanelRack RackMate presets", () => {
     expect(profile).not.toHaveAttribute("aria-invalid");
     expect(profile).not.toHaveAttribute("aria-describedby");
   });
+
+  it.each([
+    ["blank", ""],
+    ["zero", "0"],
+    ["over-100", "101"],
+    ["fractional", "12.5"],
+  ])(
+    "rejects a %s rack height without truncating or leaving field drift",
+    async (_label, value) => {
+      const layoutStore = getLayoutStore();
+      const rack = createTestRack({ height: 18, width: 19, depth_mm: 600 });
+      layoutStore.loadLayout(createTestLayout({ racks: [rack] }));
+      layoutStore.markClean();
+
+      render(EditPanelRack, {
+        props: { selectedRack: layoutStore.racks[0]!, selectedGroup: null },
+      });
+      const height = screen.getByLabelText("Height");
+      await fireEvent.change(height, { target: { value } });
+
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent(
+        "Height must be a whole number between 1 and 100U",
+      );
+      expect(height).toHaveValue(18);
+      expect(height).toHaveAttribute("aria-invalid", "true");
+      expect(height).toHaveAttribute("aria-describedby", alert.id);
+      expect(
+        screen.getByRole("group", { name: "Rack width in inches" }),
+      ).not.toHaveAttribute("aria-describedby");
+      expect(
+        screen.getByRole("group", { name: "Rack profile" }),
+      ).not.toHaveAttribute("aria-describedby");
+      expect(layoutStore.racks[0]?.height).toBe(18);
+      expect(layoutStore.isDirty).toBe(false);
+      expect(layoutStore.canUndo).toBe(false);
+    },
+  );
 
   it("announces an invalid depth only beside the Depth field", async () => {
     const user = userEvent.setup();

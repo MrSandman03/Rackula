@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/svelte";
+import { fireEvent, render, screen, within } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import RackEditSheet from "$lib/components/RackEditSheet.svelte";
@@ -27,6 +27,40 @@ describe("RackEditSheet rack profiles", () => {
     expect(updateRack).not.toHaveBeenCalled();
     expect(screen.getByTestId("btn-preset-height-42")).toBeInTheDocument();
     expect(screen.queryByText(/RackMate T1 Plus is fixed/)).toBeNull();
+  });
+
+  it("keeps the active Generic profile history-free on an ordinary rack", async () => {
+    const user = userEvent.setup();
+    const layoutStore = getLayoutStore();
+    const rack = createTestRack({ height: 12, width: 10, depth_mm: 400 });
+    layoutStore.loadLayout(createTestLayout({ racks: [rack] }));
+    layoutStore.markClean();
+
+    render(RackEditSheet, { props: { rack: layoutStore.racks[0]! } });
+    await user.click(screen.getByRole("button", { name: "Generic" }));
+
+    expect(layoutStore.racks[0]?.profile).toBeUndefined();
+    expect(layoutStore.isDirty).toBe(false);
+    expect(layoutStore.canUndo).toBe(false);
+  });
+
+  it("lets an ambiguous unmarked legacy tuple be explicitly marked Generic", async () => {
+    const user = userEvent.setup();
+    const layoutStore = getLayoutStore();
+    const rack = createTestRack({
+      name: "RackMate T1 Plus",
+      height: 8,
+      width: 10,
+      depth_mm: 260,
+      profile: undefined,
+    });
+    layoutStore.loadLayout(createTestLayout({ racks: [rack] }));
+
+    render(RackEditSheet, { props: { rack: layoutStore.racks[0]! } });
+    await user.click(screen.getByRole("button", { name: "Generic" }));
+
+    expect(layoutStore.racks[0]?.profile).toBe("generic");
+    expect(layoutStore.canUndo).toBe(true);
   });
 
   it("identifies only an explicit RackMate profile as fixed", () => {
@@ -223,6 +257,42 @@ describe("RackEditSheet rack profiles", () => {
     expect(height).toHaveAttribute("aria-describedby", alert.id);
     expect(layoutStore.canUndo).toBe(false);
   });
+
+  it.each([
+    ["blank", ""],
+    ["zero", "0"],
+    ["over-100", "101"],
+    ["fractional", "12.5"],
+  ])(
+    "rejects a %s mobile rack height without truncating or leaving field drift",
+    async (_label, value) => {
+      const layoutStore = getLayoutStore();
+      const rack = createTestRack({ height: 18, width: 19, depth_mm: 600 });
+      layoutStore.loadLayout(createTestLayout({ racks: [rack] }));
+      layoutStore.markClean();
+
+      render(RackEditSheet, { props: { rack: layoutStore.racks[0]! } });
+      const height = screen.getByLabelText("Height");
+      await fireEvent.change(height, { target: { value } });
+
+      const alert = screen.getByRole("alert");
+      expect(alert).toHaveTextContent(
+        "Height must be a whole number between 1 and 100U",
+      );
+      expect(height).toHaveValue(18);
+      expect(height).toHaveAttribute("aria-invalid", "true");
+      expect(height).toHaveAttribute("aria-describedby", alert.id);
+      expect(
+        screen.getByRole("group", { name: "Rack width in inches" }),
+      ).not.toHaveAttribute("aria-describedby");
+      expect(
+        screen.getByRole("group", { name: "Rack profile" }),
+      ).not.toHaveAttribute("aria-describedby");
+      expect(layoutStore.racks[0]?.height).toBe(18);
+      expect(layoutStore.isDirty).toBe(false);
+      expect(layoutStore.canUndo).toBe(false);
+    },
+  );
 
   it("does not add an undo step for the active mobile height preset", async () => {
     const user = userEvent.setup();
