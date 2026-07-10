@@ -11,42 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # A prettier reformat cannot change behaviour, rendering, or a11y, so when the
-  # rackula-format-bot pushes a "chore: prettier auto-format" commit, only the
-  # validate gate (which re-runs format:check, the reason the commit re-triggers
-  # CI) needs to run. Detect that commit here so the behaviour jobs can skip it.
-  # A PAT push makes github.actor the token owner, not the bot, so the commit
-  # author/subject is the reliable signal. See issue #2840.
-  detect:
-    name: detect autoformat commit
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      autoformat: ${{ steps.check.outputs.autoformat }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 1
-          persist-credentials: false
-      - id: check
-        run: |
-          author="$(git log -1 --format='%an')"
-          subject="$(git log -1 --format='%s')"
-          if [ "$author" = "rackula-format-bot" ] && [ "$subject" = "chore: prettier auto-format" ]; then
-            echo "Autoformat commit detected; behaviour jobs will be skipped."
-            echo "autoformat=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "autoformat=false" >> "$GITHUB_OUTPUT"
-          fi
-
   api:
     name: api (typecheck + tests)
-    needs: detect
-    # Fail open: skip only on a confirmed autoformat detection. A failed or
-    # cancelled detect job must not silently skip the behaviour tests.
-    if: ${{ !cancelled() && !(needs.detect.result == 'success' && needs.detect.outputs.autoformat == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -163,10 +129,10 @@ jobs:
   # untrusted code executes on the homelab runner.
   e2e-self-hosted:
     name: e2e (self-hosted full suite)
-    needs: [validate, detect]
+    needs: validate
     # The RackMate fork has no upstream homelab runner or approval environments.
     # Keep this additive tier upstream-only so fork PRs conclude after hosted CI.
-    if: ${{ github.repository == 'RackulaLives/Rackula' && !cancelled() && needs.validate.result == 'success' && github.event_name == 'pull_request' && !(needs.detect.result == 'success' && needs.detect.outputs.autoformat == 'true') }}
+    if: ${{ github.repository == 'RackulaLives/Rackula' && github.event_name == 'pull_request' }}
     # Advisory, not merge-blocking. Per spike #1994 the self-hosted tier is
     # *additive* to the GH-hosted chromium smoke (the validate job), which stays
     # the hard gate. This job runs on a single homelab VM (one runner, one host)
@@ -300,10 +266,6 @@ jobs:
 
   visual:
     name: visual regression
-    needs: detect
-    # Fail open: skip only on a confirmed autoformat detection. A failed or
-    # cancelled detect job must not silently skip the behaviour tests.
-    if: ${{ !cancelled() && !(needs.detect.result == 'success' && needs.detect.outputs.autoformat == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -347,10 +309,6 @@ jobs:
 
   a11y:
     name: a11y (axe-core)
-    needs: detect
-    # Fail open: skip only on a confirmed autoformat detection. A failed or
-    # cancelled detect job must not silently skip the behaviour tests.
-    if: ${{ !cancelled() && !(needs.detect.result == 'success' && needs.detect.outputs.autoformat == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
