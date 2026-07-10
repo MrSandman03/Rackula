@@ -96,10 +96,14 @@ export const MAX_SHARE_ACCEPTED_CATEGORIES =
 export const MAX_SHARE_RACK_WIDTHS_PER_DEVICE_TYPE = 4;
 export const MAX_SHARE_FIT_LIST_ITEMS = 256;
 
+function isKnownShareCategoryAbbreviation(value: string): boolean {
+  return value in ABBREV_TO_CATEGORY;
+}
+
 const ShareCategoryAbbreviationSchema = z
   .string()
   .length(1)
-  .refine((value) => value in ABBREV_TO_CATEGORY, {
+  .refine(isKnownShareCategoryAbbreviation, {
     message: "Unknown device category abbreviation",
   });
 
@@ -377,6 +381,39 @@ export const MinimalLayoutV2Schema = z
     dt: z.array(MinimalDeviceTypeSchema).max(MAX_SHARE_DEVICE_TYPES),
   })
   .superRefine((layout, ctx) => {
+    const seenRackIds = new Set<string>();
+    for (let rackIndex = 0; rackIndex < layout.rs.length; rackIndex++) {
+      const rackId = layout.rs[rackIndex]!.i;
+      if (seenRackIds.has(rackId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Duplicate compact rack ID: ${rackId}`,
+          path: ["rs", rackIndex, "i"],
+        });
+      }
+      seenRackIds.add(rackId);
+    }
+
+    // Legacy formats keep their historical unknown-category fallback. In v3,
+    // compact definitions are authoritative and an unknown abbreviation is
+    // corruption rather than a value that can be rewritten to "other".
+    if (layout.fv === SHARE_FORMAT_VERSION) {
+      for (
+        let deviceTypeIndex = 0;
+        deviceTypeIndex < layout.dt.length;
+        deviceTypeIndex++
+      ) {
+        const category = layout.dt[deviceTypeIndex]!.x;
+        if (!isKnownShareCategoryAbbreviation(category)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Unknown authoritative device category abbreviation",
+            path: ["dt", deviceTypeIndex, "x"],
+          });
+        }
+      }
+    }
+
     const totalDevices = layout.rs.reduce(
       (total, rack) => total + rack.d.length,
       0,

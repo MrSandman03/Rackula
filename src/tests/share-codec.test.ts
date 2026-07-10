@@ -415,6 +415,54 @@ describe("decodeLayout", () => {
     expect(decodeLayout(encoded).layout).toBeNull();
   });
 
+  it("rejects duplicate compact rack IDs before resolving rack groups", () => {
+    const encoded = LZString.compressToEncodedURIComponent(
+      JSON.stringify({
+        v: "1.0",
+        fv: 3,
+        n: "Duplicate rack IDs",
+        rs: [
+          { i: "0", n: "Rack A", h: 8, w: 19, d: [] },
+          { i: "0", n: "Rack B", h: 8, w: 19, d: [] },
+        ],
+        rg: [{ n: "Ambiguous group", p: "row", rs: ["0"] }],
+        dt: [],
+      }),
+    );
+
+    expect(decodeLayout(encoded).layout).toBeNull();
+  });
+
+  it("rejects an unknown authoritative device category in format v3", () => {
+    const encoded = LZString.compressToEncodedURIComponent(
+      JSON.stringify({
+        v: "1.0",
+        fv: 3,
+        n: "Unknown current category",
+        rs: [
+          {
+            i: "0",
+            n: "Rack",
+            h: 8,
+            w: 19,
+            d: [{ t: "unknown-category-device", p: 1, f: "front" }],
+          },
+        ],
+        dt: [
+          {
+            s: "unknown-category-device",
+            h: 1,
+            c: "#336699",
+            x: "q",
+            o: 1,
+          },
+        ],
+      }),
+    );
+
+    expect(decodeLayout(encoded).layout).toBeNull();
+  });
+
   it("rejects an oversized accepted-category collection inside one slot", () => {
     const encoded = LZString.compressToEncodedURIComponent(
       JSON.stringify({

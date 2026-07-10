@@ -464,6 +464,32 @@ describe("multi-rack share", () => {
     expect(decoded.racks[0]?.depth_mm).toBe(260);
   });
 
+  it("clamps an over-rack device after inferring RackMate from a legacy v1 tuple", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      n: "Legacy RackMate Over-Rack Layout",
+      r: {
+        n: "RackMate T1 Plus",
+        h: 8,
+        w: 10,
+        d: [{ t: "legacy-two-u-device", p: 8, f: "front" }],
+      },
+      dt: [
+        {
+          s: "legacy-two-u-device",
+          h: 2,
+          c: "#336699",
+          x: "n",
+        },
+      ],
+    });
+
+    const decoded = requireDecoded(encoded);
+
+    expect(decoded.racks[0]?.profile).toBe("rackmate-t1-plus");
+    expect(decoded.racks[0]?.devices[0]?.position).toBe(42);
+  });
+
   it.each([undefined, 1, 2])(
     "infers the RackMate profile from an exact legacy v2 tuple with format version %s",
     (formatVersion) => {
@@ -489,6 +515,65 @@ describe("multi-rack share", () => {
       expect(decoded.racks[0]?.depth_mm).toBe(260);
     },
   );
+
+  it("clamps an over-rack device after inferring RackMate from a legacy v2 tuple", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 2,
+      n: "Legacy RackMate Over-Rack Layout",
+      rs: [
+        {
+          i: "0",
+          n: "RackMate T1 Plus",
+          h: 8,
+          w: 10,
+          d: [{ t: "legacy-two-u-device", p: 8, f: "front" }],
+        },
+      ],
+      dt: [
+        {
+          s: "legacy-two-u-device",
+          h: 2,
+          c: "#336699",
+          x: "n",
+        },
+      ],
+    });
+
+    const decoded = requireDecoded(encoded);
+
+    expect(decoded.racks[0]?.profile).toBe("rackmate-t1-plus");
+    expect(decoded.racks[0]?.devices[0]?.position).toBe(42);
+  });
+
+  it("keeps the unknown-category fallback for legacy format v2", () => {
+    const encoded = encodeLegacyPayload({
+      v: "1.0",
+      fv: 2,
+      n: "Legacy Unknown Category",
+      rs: [
+        {
+          i: "0",
+          n: "Rack",
+          h: 8,
+          w: 19,
+          d: [{ t: "legacy-category-device", p: 1, f: "front" }],
+        },
+      ],
+      dt: [
+        {
+          s: "legacy-category-device",
+          h: 1,
+          c: "#336699",
+          x: "q",
+        },
+      ],
+    });
+
+    const decoded = requireDecoded(encoded);
+
+    expect(decoded.device_types[0]?.category).toBe("other");
+  });
 
   it("keeps an exact omitted-profile tuple generic in format v3", () => {
     const encoded = encodeLegacyPayload({

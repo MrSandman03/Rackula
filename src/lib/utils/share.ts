@@ -34,6 +34,7 @@ import {
   type MinimalRackulaFit,
 } from "$lib/schemas/share";
 import { LayoutSchema, LegacyShareLayoutSchema } from "$lib/schemas";
+import { clampOverRackPositions } from "$lib/schemas/migrations";
 import { VERSION } from "$lib/version";
 import { generateId } from "./device";
 import { createDefaultRack } from "./serialization";
@@ -153,6 +154,22 @@ function resolveSharedRackProfile(
     rack.w === RACKMATE_T1_PLUS_WIDTH
     ? RACKMATE_T1_PLUS_PROFILE
     : undefined;
+}
+
+interface ConvertedShareLayout {
+  layout: Layout;
+  legacyInferredRackMateRackIds: Set<string>;
+}
+
+function wasLegacyRackMateProfileInferred(
+  rack: Pick<MinimalRackV2, "pf" | "dp">,
+  profile: MinimalRackV2["pf"],
+): boolean {
+  return (
+    profile === RACKMATE_T1_PLUS_PROFILE &&
+    rack.pf === undefined &&
+    rack.dp === undefined
+  );
 }
 
 /**
@@ -427,7 +444,7 @@ export function toMinimalLayout(layout: Layout): MinimalLayoutV2 {
 /**
  * Convert v1 MinimalLayout (single rack) back to full Layout
  */
-function fromMinimalLayoutV1(minimal: MinimalLayout): Layout {
+function fromMinimalLayoutV1(minimal: MinimalLayout): ConvertedShareLayout {
   const device_types = convertDeviceTypes(minimal.dt, false);
   const devices = convertMinimalDevices(minimal.r.d);
   const profile = resolveSharedRackProfile(minimal.r, true);
@@ -449,21 +466,26 @@ function fromMinimalLayoutV1(minimal: MinimalLayout): Layout {
   rack.devices = devices;
 
   return {
-    version: minimal.v,
-    name: minimal.n,
-    racks: [rack],
-    device_types,
-    settings: {
-      display_mode: "label",
-      show_labels_on_images: false,
+    layout: {
+      version: minimal.v,
+      name: minimal.n,
+      racks: [rack],
+      device_types,
+      settings: {
+        display_mode: "label",
+        show_labels_on_images: false,
+      },
     },
+    legacyInferredRackMateRackIds: new Set(
+      wasLegacyRackMateProfileInferred(minimal.r, profile) ? [rack.id] : [],
+    ),
   };
 }
 
 /**
  * Convert v2 MinimalLayoutV2 (multi-rack) back to full Layout
  */
-function fromMinimalLayoutV2(minimal: MinimalLayoutV2): Layout {
+function fromMinimalLayoutV2(minimal: MinimalLayoutV2): ConvertedShareLayout {
   const isLegacyFormat = (minimal.fv ?? 1) < SHARE_FORMAT_VERSION;
   if (!isLegacyFormat) {
     const definedSlugs = new Set(minimal.dt.map((deviceType) => deviceType.s));
@@ -483,11 +505,15 @@ function fromMinimalLayoutV2(minimal: MinimalLayoutV2): Layout {
 
   // Build reverse map: shortId -> generated UUID
   const shortIdToUuid = new Map<string, string>();
+  const legacyInferredRackMateRackIds = new Set<string>();
 
   const racks = minimal.rs.map((minRack) => {
     const rackId = generateId();
     shortIdToUuid.set(minRack.i, rackId);
     const profile = resolveSharedRackProfile(minRack, isLegacyFormat);
+    if (wasLegacyRackMateProfileInferred(minRack, profile)) {
+      legacyInferredRackMateRackIds.add(rackId);
+    }
 
     const rack = createDefaultRack(
       minRack.n,
@@ -531,15 +557,18 @@ function fromMinimalLayoutV2(minimal: MinimalLayoutV2): Layout {
       : undefined;
 
   return {
-    version: minimal.v,
-    name: minimal.n,
-    racks,
-    ...(rack_groups ? { rack_groups } : {}),
-    device_types,
-    settings: {
-      display_mode: "label",
-      show_labels_on_images: false,
+    layout: {
+      version: minimal.v,
+      name: minimal.n,
+      racks,
+      ...(rack_groups ? { rack_groups } : {}),
+      device_types,
+      settings: {
+        display_mode: "label",
+        show_labels_on_images: false,
+      },
     },
+    legacyInferredRackMateRackIds,
   };
 }
 
@@ -610,15 +639,39 @@ export interface DecodeResult {
 }
 
 function validateDecodedLayout(
-  layout: Layout,
+  converted: ConvertedShareLayout,
   legacyFormat: boolean,
 ): DecodeResult {
   // Conversion already moved human-U positions into current internal units.
   // Legacy formats still need carrier adaptation and saved-data waivers. V3 is
   // authoritative current data and must pass strict validation unchanged.
-  let candidate: Layout = { ...layout, version: VERSION };
+  let candidate: Layout = { ...converted.layout, version: VERSION };
   if (legacyFormat) {
     candidate = adaptLegacyLayout(candidate);
+
+    if (converted.legacyInferredRackMateRackIds.size > 0) {
+      const uHeightBySlug = new Map(
+        candidate.device_types.map((deviceType) => [
+          deviceType.slug,
+          deviceType.u_height,
+        ]),
+      );
+      candidate = {
+        ...candidate,
+        racks: candidate.racks.map((rack) =>
+          converted.legacyInferredRackMateRackIds.has(rack.id)
+            ? {
+                ...rack,
+                devices: clampOverRackPositions(
+                  rack.devices,
+                  rack.height,
+                  uHeightBySlug,
+                ),
+              }
+            : rack,
+        ),
+      };
+    }
   }
 
   const result = legacyFormat
