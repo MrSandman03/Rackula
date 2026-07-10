@@ -9,9 +9,11 @@
  */
 
 import { mkdir, readdir, rm, writeFile } from "fs/promises";
-import { dirname, join, relative } from "path";
+import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { format } from "prettier";
+import estreePlugin from "prettier/plugins/estree";
+import typescriptPlugin from "prettier/plugins/typescript";
 import {
   parseImagePath,
   generateImportName,
@@ -25,10 +27,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const REPO_ROOT = join(__dirname, "..");
-const IMAGES_DIR = join(REPO_ROOT, "src", "lib", "assets", "device-images");
 const DATA_DIR = join(REPO_ROOT, "src", "lib", "data");
-const OUTPUT_FILE = join(DATA_DIR, "bundledImages.ts");
-const GENERATED_DIR = join(DATA_DIR, "bundledImages.generated");
 const MAX_GENERATED_FILE_LINES = 1000;
 
 // Generic starter-library buckets are maintained in the facade template below.
@@ -36,6 +35,34 @@ const GENERIC_LIBRARY_DIR = "_generic";
 
 type GroupedImage = GroupedImages[string];
 type VendorEntries = Map<string, Array<[string, GroupedImage]>>;
+
+export interface BundledImageGeneratorPaths {
+  repoRoot: string;
+  imagesDir: string;
+  outputFile: string;
+  generatedDir: string;
+}
+
+export interface BundledImageGeneratorOptions {
+  paths?: BundledImageGeneratorPaths;
+  maxGeneratedFileLines?: number;
+  log?: (message?: string) => void;
+}
+
+export interface BundledImageGeneratorResult {
+  imageFileCount: number;
+  parsedImageCount: number;
+  deviceCount: number;
+  vendorCount: number;
+}
+
+export const DEFAULT_BUNDLED_IMAGE_GENERATOR_PATHS: BundledImageGeneratorPaths =
+  {
+    repoRoot: REPO_ROOT,
+    imagesDir: join(REPO_ROOT, "src", "lib", "assets", "device-images"),
+    outputFile: join(DATA_DIR, "bundledImages.ts"),
+    generatedDir: join(DATA_DIR, "bundledImages.generated"),
+  };
 
 async function getImageFiles(
   dir: string,
@@ -289,12 +316,17 @@ export function hasBundledImage(slug: string): boolean {
 async function formatTypeScript(
   path: string,
   source: string,
+  repoRoot: string,
+  maxGeneratedFileLines: number,
 ): Promise<readonly [string, string]> {
-  const formatted = await format(source, { parser: "typescript" });
+  const formatted = await format(source, {
+    parser: "typescript",
+    plugins: [typescriptPlugin, estreePlugin],
+  });
   const lineCount = formatted.trimEnd().split(/\r?\n/).length;
-  if (lineCount > MAX_GENERATED_FILE_LINES) {
+  if (lineCount > maxGeneratedFileLines) {
     throw new Error(
-      `Generated file ${relative(REPO_ROOT, path)} has ${lineCount} lines; split the vendor before writing it.`,
+      `Generated file ${relative(repoRoot, path)} has ${lineCount} lines; split the vendor before writing it.`,
     );
   }
   return [path, formatted];
@@ -302,39 +334,51 @@ async function formatTypeScript(
 
 async function writeGeneratedManifest(
   groupedImages: GroupedImages,
+  paths: BundledImageGeneratorPaths,
+  maxGeneratedFileLines: number,
 ): Promise<void> {
   const byVendor = groupEntriesByVendor(groupedImages);
   const vendors = [...byVendor.keys()];
 
   const sources: Array<readonly [string, string]> = [
-    [OUTPUT_FILE, renderFacade()],
-    [join(GENERATED_DIR, "types.ts"), renderGeneratedTypes()],
-    [join(GENERATED_DIR, "index.ts"), renderGeneratedIndex(vendors)],
+    [paths.outputFile, renderFacade()],
+    [join(paths.generatedDir, "types.ts"), renderGeneratedTypes()],
+    [join(paths.generatedDir, "index.ts"), renderGeneratedIndex(vendors)],
     ...vendors.map(
       (vendor) =>
         [
-          join(GENERATED_DIR, `${vendor}.ts`),
+          join(paths.generatedDir, `${vendor}.ts`),
           renderVendorModule(vendor, byVendor.get(vendor) ?? []),
         ] as const,
     ),
   ];
   const outputs = await Promise.all(
-    sources.map(([path, source]) => formatTypeScript(path, source)),
+    sources.map(([path, source]) =>
+      formatTypeScript(path, source, paths.repoRoot, maxGeneratedFileLines),
+    ),
   );
 
-  await rm(GENERATED_DIR, { recursive: true, force: true });
-  await mkdir(GENERATED_DIR, { recursive: true });
+  await rm(paths.generatedDir, { recursive: true, force: true });
+  await mkdir(paths.generatedDir, { recursive: true });
+  await mkdir(dirname(paths.outputFile), { recursive: true });
   await Promise.all(
     outputs.map(([path, formatted]) => writeFile(path, formatted, "utf-8")),
   );
 }
 
-async function main(): Promise<void> {
-  console.log("Bundled Images Generator");
-  console.log("========================\n");
+export async function generateBundledImages(
+  options: BundledImageGeneratorOptions = {},
+): Promise<BundledImageGeneratorResult> {
+  const paths = options.paths ?? DEFAULT_BUNDLED_IMAGE_GENERATOR_PATHS;
+  const maxGeneratedFileLines =
+    options.maxGeneratedFileLines ?? MAX_GENERATED_FILE_LINES;
+  const log = options.log ?? console.log;
 
-  const imageFiles = await getImageFiles(IMAGES_DIR);
-  console.log(`Found ${imageFiles.length} device images\n`);
+  log("Bundled Images Generator");
+  log("========================\n");
+
+  const imageFiles = await getImageFiles(paths.imagesDir);
+  log(`Found ${imageFiles.length} device images\n`);
 
   const parsedImages: ParsedImage[] = [];
   for (const file of imageFiles) {
@@ -343,25 +387,42 @@ async function main(): Promise<void> {
       parsedImages.push(parsed);
     }
   }
-  console.log(`Parsed ${parsedImages.length} valid images\n`);
+  log(`Parsed ${parsedImages.length} valid images\n`);
 
   const grouped = groupImagesBySlug(parsedImages);
   const byVendor = groupEntriesByVendor(grouped);
-  console.log(`Grouped into ${Object.keys(grouped).length} device entries\n`);
-  console.log("By vendor:");
+  const deviceCount = Object.keys(grouped).length;
+  log(`Grouped into ${deviceCount} device entries\n`);
+  log("By vendor:");
   for (const [vendor, entries] of byVendor) {
-    console.log(`  ${vendor}: ${entries.length} devices`);
+    log(`  ${vendor}: ${entries.length} devices`);
   }
-  console.log();
+  log();
 
-  await writeGeneratedManifest(grouped);
-  console.log(`Generated: ${relative(process.cwd(), OUTPUT_FILE)}`);
-  console.log(
-    `Generated vendor modules: ${relative(process.cwd(), GENERATED_DIR)}`,
+  await writeGeneratedManifest(grouped, paths, maxGeneratedFileLines);
+  log(`Generated: ${relative(process.cwd(), paths.outputFile)}`);
+  log(
+    `Generated vendor modules: ${relative(process.cwd(), paths.generatedDir)}`,
+  );
+
+  return {
+    imageFileCount: imageFiles.length,
+    parsedImageCount: parsedImages.length,
+    deviceCount,
+    vendorCount: byVendor.size,
+  };
+}
+
+function isDirectExecution(): boolean {
+  const entrypoint = process.argv[1];
+  return (
+    entrypoint !== undefined && resolve(entrypoint) === resolve(__filename)
   );
 }
 
-main().catch((error: unknown) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (isDirectExecution()) {
+  generateBundledImages().catch((error: unknown) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}

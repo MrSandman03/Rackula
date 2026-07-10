@@ -59,6 +59,10 @@ jobs:
         if: inputs.dry_run == false
         run: npm run process-images
 
+      - name: Generate bundled image manifests
+        if: inputs.dry_run == false
+        run: npm run generate-bundled-images
+
       - name: Check for changes
         if: inputs.dry_run == false
         id: changes
@@ -86,7 +90,7 @@ jobs:
             ## Checklist
             - [ ] Review imported device definitions
             - [ ] Verify images render correctly
-            - [ ] Update `bundledImages.ts` if needed
+            - [ ] Verify generated bundled image manifests
             - [ ] Run tests locally
 
             ---
