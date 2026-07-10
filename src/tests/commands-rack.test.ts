@@ -11,14 +11,14 @@ import { createTestRack, createTestDevice } from "./factories";
 import { toInternalUnits } from "$lib/utils/position";
 
 function createMockStore(rack: Rack = createTestRack()): RackCommandStore & {
-  updateRackRaw: ReturnType<typeof vi.fn>;
+  applyRackSettingsFromHistoryRaw: ReturnType<typeof vi.fn>;
   replaceRackRaw: ReturnType<typeof vi.fn>;
   clearRackDevicesRaw: ReturnType<typeof vi.fn>;
   restoreRackDevicesRaw: ReturnType<typeof vi.fn>;
   getRack: ReturnType<typeof vi.fn>;
 } {
   return {
-    updateRackRaw: vi.fn(),
+    applyRackSettingsFromHistoryRaw: vi.fn(),
     replaceRackRaw: vi.fn(),
     clearRackDevicesRaw: vi.fn().mockReturnValue([]),
     restoreRackDevicesRaw: vi.fn(),
@@ -40,7 +40,7 @@ describe("Rack Commands", () => {
       expect(typeof command.timestamp).toBe("number");
     });
 
-    it("execute calls updateRackRaw with after values", () => {
+    it("execute applies the exact after values from history", () => {
       const store = createMockStore();
       const before = { height: 42 };
       const after = { height: 48 };
@@ -48,11 +48,11 @@ describe("Rack Commands", () => {
       const command = createUpdateRackCommand(before, after, store);
       command.execute();
 
-      expect(store.updateRackRaw).toHaveBeenCalledTimes(1);
-      expect(store.updateRackRaw).toHaveBeenCalledWith(after);
+      expect(store.applyRackSettingsFromHistoryRaw).toHaveBeenCalledTimes(1);
+      expect(store.applyRackSettingsFromHistoryRaw).toHaveBeenCalledWith(after);
     });
 
-    it("undo calls updateRackRaw with before values", () => {
+    it("undo applies the exact before values from history", () => {
       const store = createMockStore();
       const before: Partial<RackSettings> = { height: 42, width: 19 };
       const after: Partial<RackSettings> = { height: 48, width: 10 };
@@ -61,8 +61,10 @@ describe("Rack Commands", () => {
       command.execute();
       command.undo();
 
-      expect(store.updateRackRaw).toHaveBeenCalledTimes(2);
-      expect(store.updateRackRaw).toHaveBeenLastCalledWith(before);
+      expect(store.applyRackSettingsFromHistoryRaw).toHaveBeenCalledTimes(2);
+      expect(store.applyRackSettingsFromHistoryRaw).toHaveBeenLastCalledWith(
+        before,
+      );
     });
 
     it("updates show_rear property", () => {
@@ -73,11 +75,15 @@ describe("Rack Commands", () => {
       const command = createUpdateRackCommand(before, after, store);
       command.execute();
 
-      expect(store.updateRackRaw).toHaveBeenCalledWith({ show_rear: false });
+      expect(store.applyRackSettingsFromHistoryRaw).toHaveBeenCalledWith({
+        show_rear: false,
+      });
 
       command.undo();
 
-      expect(store.updateRackRaw).toHaveBeenLastCalledWith({ show_rear: true });
+      expect(store.applyRackSettingsFromHistoryRaw).toHaveBeenLastCalledWith({
+        show_rear: true,
+      });
     });
   });
 

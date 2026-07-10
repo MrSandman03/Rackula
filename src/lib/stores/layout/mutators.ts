@@ -522,6 +522,21 @@ export function updateRackRaw(
 }
 
 /**
+ * Apply settings already validated and captured by a history command.
+ * History replay must preserve undefined optional fields exactly instead of
+ * reinterpreting an old rack snapshot as current authoring.
+ */
+export function applyRackSettingsFromHistoryRaw(
+  ctx: LayoutStateAccess,
+  updates: Partial<Omit<Rack, "devices" | "view">>,
+): void {
+  const target = getTargetRack(ctx);
+  if (!target) return;
+
+  updateRackAtIndex(ctx, target.index, (rack) => ({ ...rack, ...updates }));
+}
+
+/**
  * Replace the entire rack directly (raw)
  * Uses active rack
  * @param ctx - Layout state access

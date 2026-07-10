@@ -36,7 +36,7 @@ import {
   updateDeviceIpRaw,
   getDeviceAtIndex,
   getPlacedDevicesForType,
-  updateRackRaw,
+  applyRackSettingsFromHistoryRaw,
   replaceRackRaw,
   clearRackDevicesRaw,
   restoreRackDevicesRaw,
@@ -149,7 +149,8 @@ export function getCommandStoreAdapter(
     getDeviceAtIndex: (index) => getDeviceAtIndex(ctx, index),
 
     // RackCommandStore
-    updateRackRaw: (updates) => updateRackRaw(ctx, updates),
+    applyRackSettingsFromHistoryRaw: (updates) =>
+      applyRackSettingsFromHistoryRaw(ctx, updates),
     replaceRackRaw: (newRack) => replaceRackRaw(ctx, newRack),
     clearRackDevicesRaw: () => clearRackDevicesRaw(ctx),
     restoreRackDevicesRaw: (devices) => restoreRackDevicesRaw(ctx, devices),

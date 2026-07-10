@@ -655,8 +655,6 @@ export function updateRack(
     devices: _devices,
     ...candidateUpdates
   } = constrainedUpdates;
-  const recordableUpdates = filterUnchangedRackUpdates(rack, candidateUpdates);
-  if (Object.keys(recordableUpdates).length === 0) return;
 
   // BayedRackView renders one shared U-label column read from racks[0], so
   // all bays must agree on desc_units / starting_unit. When the change
@@ -666,17 +664,21 @@ export function updateRack(
   const numberingKeys = ["desc_units", "starting_unit"] as const;
   const numberingUpdates: Partial<Omit<Rack, "devices" | "view">> = {};
   for (const key of numberingKeys) {
-    if (key in recordableUpdates) {
-      numberingUpdates[key] = recordableUpdates[key] as never;
+    if (key in candidateUpdates) {
+      numberingUpdates[key] = candidateUpdates[key] as never;
     }
   }
 
-  if (group?.layout_preset === "bayed" && group.rack_ids.length > 1) {
+  if (
+    group?.layout_preset === "bayed" &&
+    group.rack_ids.length > 1 &&
+    Object.keys(numberingUpdates).length > 0
+  ) {
     // Origin gets the full update; peers only get the numbering keys.
     const targets: {
       rackId: string;
       updates: Partial<Omit<Rack, "devices" | "view">>;
-    }[] = [{ rackId: id, updates: recordableUpdates }];
+    }[] = [{ rackId: id, updates: candidateUpdates }];
     for (const peerId of group.rack_ids) {
       if (peerId === id) continue;
       targets.push({ rackId: peerId, updates: numberingUpdates });
@@ -684,6 +686,9 @@ export function updateRack(
     updateRacksBatchRecordedFn(targets, "Update bayed rack");
     return;
   }
+
+  const recordableUpdates = filterUnchangedRackUpdates(rack, candidateUpdates);
+  if (Object.keys(recordableUpdates).length === 0) return;
 
   updateRackRecordedFn(id, recordableUpdates);
 }

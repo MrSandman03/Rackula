@@ -61,6 +61,12 @@ describe("RackEditSheet rack profiles", () => {
 
     expect(layoutStore.racks[0]?.profile).toBe("generic");
     expect(layoutStore.canUndo).toBe(true);
+
+    expect(layoutStore.undo()).toBe(true);
+    expect(layoutStore.racks[0]?.profile).toBeUndefined();
+
+    expect(layoutStore.redo()).toBe(true);
+    expect(layoutStore.racks[0]?.profile).toBe("generic");
   });
 
   it("identifies only an explicit RackMate profile as fixed", () => {

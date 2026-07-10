@@ -14,7 +14,7 @@ export type RackSettings = Omit<Rack, "devices" | "view">;
  * Interface for layout store operations needed by rack commands
  */
 export interface RackCommandStore {
-  updateRackRaw(updates: Partial<RackSettings>): void;
+  applyRackSettingsFromHistoryRaw(updates: Partial<RackSettings>): void;
   replaceRackRaw(rack: Rack): void;
   clearRackDevicesRaw(): PlacedDevice[];
   restoreRackDevicesRaw(devices: PlacedDevice[]): void;
@@ -159,10 +159,10 @@ export function createUpdateRackCommand(
     description: "Update rack settings",
     timestamp: Date.now(),
     execute() {
-      store.updateRackRaw(after);
+      store.applyRackSettingsFromHistoryRaw(after);
     },
     undo() {
-      store.updateRackRaw(before);
+      store.applyRackSettingsFromHistoryRaw(before);
     },
   };
 }

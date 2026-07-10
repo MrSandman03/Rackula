@@ -20,7 +20,7 @@ import { constrainRackProfileUpdates } from "$lib/utils/rack-profile";
 import { filterUnchangedRackUpdates } from "$lib/utils/rack";
 
 /**
- * Bind a command to a specific rack. The raw mutators behind rack commands
+ * Bind a command to a specific rack. The history mutators behind rack commands
  * operate on whichever rack is active, so execute/undo must activate the
  * target rack first and restore the previously active rack afterwards.
  * Mirrors what createCrossRackMoveCommand does with getActiveRackId() so
@@ -135,8 +135,8 @@ export function updateRacksBatchRecorded(
       before[key] = current as never;
     }
 
-    // Each sub-command activates its target rack because updateRackRaw
-    // targets whichever rack is active, then restores the previous one.
+    // Each sub-command activates its target rack because history replay targets
+    // whichever rack is active, then restores the previous one.
     commands.push({
       ...bindCommandToRack(
         ctx,
