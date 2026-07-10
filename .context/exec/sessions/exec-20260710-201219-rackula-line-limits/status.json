@@ -1,0 +1,84 @@
+{
+  "session_id": "exec-20260710-201219-rackula-line-limits",
+  "task": "Split all inherited Rackula source and test files above the 1,000-line hard limit",
+  "stage": "executing",
+  "session_path": ".context/exec/sessions/exec-20260710-201219-rackula-line-limits",
+  "current_step": 1,
+  "total_steps": 6,
+  "base_branch": "main",
+  "target_branch": "main",
+  "branch": "fix/legacy-line-limits",
+  "worktree": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
+  "pr_url": null,
+  "blockers": [],
+  "steps": {
+    "1": {
+      "description": "Record the exact 16-file baseline and safe split boundaries",
+      "status": "implementing",
+      "branch": "fix/legacy-line-limits",
+      "worktree_path": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
+      "retries": 0,
+      "review_verdict": null,
+      "merged_commits": [],
+      "warnings": []
+    },
+    "2": {
+      "description": "Split oversized test suites and generated/data registries",
+      "status": "pending",
+      "branch": "fix/legacy-line-limits",
+      "worktree_path": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
+      "retries": 0,
+      "review_verdict": null,
+      "merged_commits": [],
+      "warnings": []
+    },
+    "3": {
+      "description": "Decompose oversized Svelte components",
+      "status": "pending",
+      "branch": "fix/legacy-line-limits",
+      "worktree_path": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
+      "retries": 0,
+      "review_verdict": null,
+      "merged_commits": [],
+      "warnings": []
+    },
+    "4": {
+      "description": "Extract oversized core, API, and script modules",
+      "status": "pending",
+      "branch": "fix/legacy-line-limits",
+      "worktree_path": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
+      "retries": 0,
+      "review_verdict": null,
+      "merged_commits": [],
+      "warnings": []
+    },
+    "5": {
+      "description": "Add an enforced line-limit check and run full verification",
+      "status": "pending",
+      "branch": "fix/legacy-line-limits",
+      "worktree_path": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
+      "retries": 0,
+      "review_verdict": null,
+      "merged_commits": [],
+      "warnings": []
+    },
+    "6": {
+      "description": "Cold-review the exact head, push, and open a draft PR",
+      "status": "pending",
+      "branch": "fix/legacy-line-limits",
+      "worktree_path": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
+      "retries": 0,
+      "review_verdict": null,
+      "merged_commits": [],
+      "warnings": []
+    }
+  },
+  "config": {
+    "strictness": "paranoid",
+    "auto_verify": true,
+    "approval_per_step": false,
+    "review_threshold": "major"
+  },
+  "started_at": "2026-07-10T20:12:19Z",
+  "last_updated": "2026-07-10T20:12:19Z"
+}

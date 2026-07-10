@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "current_session_id": null,
+  "current_session_id": "exec-20260710-201219-rackula-line-limits",
   "sessions": {
     "20260709-054449-rackmate-agentic-review": {
       "session_path": ".context/exec/sessions/20260709-054449-rackmate-agentic-review",
@@ -43,9 +43,23 @@
       "blockers": [],
       "last_event": "PR #2 merged, post-merge verification passed, the CodeQL finding was fixed, the target lock was released, and the session closed.",
       "last_updated": "2026-07-10T20:01:52Z"
+    },
+    "exec-20260710-201219-rackula-line-limits": {
+      "session_path": ".context/exec/sessions/exec-20260710-201219-rackula-line-limits",
+      "task": "Split all inherited Rackula source and test files above the 1,000-line hard limit",
+      "stage": "executing",
+      "current_step": 1,
+      "total_steps": 6,
+      "base_branch": "main",
+      "target_branch": "main",
+      "branch": "fix/legacy-line-limits",
+      "worktree": "/Users/gavin/projects/p-rackula-minirack-worktrees/legacy-line-limits",
+      "blockers": [],
+      "last_event": "Recorded the 16-file line-limit baseline and started split-design audits.",
+      "last_updated": "2026-07-10T20:13:32Z"
     }
   },
   "target_locks": {},
-  "last_updated": "2026-07-10T20:01:52Z",
-  "last_event": "PR #2 merged, post-merge verification passed, the CodeQL finding was fixed, the target lock was released, and the session closed."
+  "last_updated": "2026-07-10T20:13:32Z",
+  "last_event": "Recorded the 16-file line-limit baseline and started split-design audits."
 }
