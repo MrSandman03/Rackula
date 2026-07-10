@@ -150,6 +150,17 @@
       return false;
     }
 
+    if (newHeight === rack.height) {
+      clearResizeError();
+      return true;
+    }
+
+    if (isBayedRack) {
+      setResizeError("height", "Bayed racks must share the same height.");
+      rackHeight = rack.height;
+      return false;
+    }
+
     // Validate the resize
     const validation = canResizeRackTo(
       rack,

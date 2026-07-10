@@ -186,6 +186,64 @@ describe("RackEditSheet rack profiles", () => {
     expect(layoutStore.racks[0]?.width).toBe(19);
   });
 
+  it("rejects a per-member bayed height without local field drift", async () => {
+    const user = userEvent.setup();
+    const layoutStore = getLayoutStore();
+    const rack = createTestRack({ height: 12, width: 19, depth_mm: 600 });
+    const peer = createTestRack({
+      id: "rack-2",
+      height: 12,
+      width: 19,
+      depth_mm: 600,
+    });
+    layoutStore.loadLayout(
+      createTestLayout({
+        racks: [rack, peer],
+        rack_groups: [
+          {
+            id: "group-1",
+            rack_ids: [rack.id, peer.id],
+            layout_preset: "bayed",
+          },
+        ],
+      }),
+    );
+
+    render(RackEditSheet, { props: { rack: layoutStore.racks[0]! } });
+    const height = screen.getByLabelText("Height");
+    await user.clear(height);
+    await user.type(height, "18");
+    await user.tab();
+
+    expect(layoutStore.racks[0]?.height).toBe(12);
+    expect(height).toHaveValue(12);
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Bayed racks must share the same height");
+    expect(height).toHaveAttribute("aria-invalid", "true");
+    expect(height).toHaveAttribute("aria-describedby", alert.id);
+    expect(layoutStore.canUndo).toBe(false);
+  });
+
+  it("does not add an undo step for the active mobile height preset", async () => {
+    const user = userEvent.setup();
+    const layoutStore = getLayoutStore();
+    const rack = createTestRack({
+      height: 8,
+      width: 10,
+      depth_mm: 260,
+      profile: "rackmate-t1-plus",
+    });
+    layoutStore.loadLayout(createTestLayout({ racks: [rack] }));
+    layoutStore.updateRack(rack.id, { name: "Renamed RackMate" });
+
+    render(RackEditSheet, { props: { rack: layoutStore.racks[0]! } });
+    await user.click(screen.getByTestId("btn-preset-height-8"));
+
+    expect(layoutStore.undo()).toBe(true);
+    expect(layoutStore.racks[0]?.name).toBe("Test Rack");
+    expect(layoutStore.undo()).toBe(false);
+  });
+
   it("rejects a non-positive mobile depth beside the Depth field", async () => {
     const user = userEvent.setup();
     const layoutStore = getLayoutStore();
