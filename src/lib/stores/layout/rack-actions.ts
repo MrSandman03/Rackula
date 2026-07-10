@@ -23,7 +23,10 @@ import type { LayoutStateAccess } from "./types";
 import { getRackGroupCommandAdapter, getRackGroupForRack } from "./rack-groups";
 import { setLayoutNamesRaw } from "./mutators";
 import { reorderRackRow } from "$lib/utils/rack-row";
-import { constrainRackProfileUpdates } from "$lib/utils/rack-profile";
+import {
+  constrainRackProfileUpdates,
+  RACKMATE_T1_PLUS_PROFILE,
+} from "$lib/utils/rack-profile";
 
 /** Recorded single-rack update action injected by the facade. */
 export type UpdateRackRecordedFn = (
@@ -39,6 +42,51 @@ export type UpdateRacksBatchRecordedFn = (
   }[],
   description: string,
 ) => void;
+
+type BayedInvariantKey = "profile" | "width" | "height";
+
+function bayedInvariantValue(
+  rack: Rack,
+  key: BayedInvariantKey,
+): Rack["profile"] | Rack["width"] | Rack["height"] {
+  if (key === "profile") {
+    return rack.profile === RACKMATE_T1_PLUS_PROFILE
+      ? RACKMATE_T1_PLUS_PROFILE
+      : "generic";
+  }
+  return rack[key];
+}
+
+/** Allow a bay invariant change only when it reduces peer disagreements. */
+function wouldDivergeBayedRack(
+  ctx: LayoutStateAccess,
+  rack: Rack,
+  group: RackGroup,
+  updates: Partial<Rack>,
+): boolean {
+  const nextRack = { ...rack, ...updates };
+  const peerIds = group.rack_ids.filter((rackId) => rackId !== rack.id);
+  const peers = peerIds
+    .map((rackId) => ctx.findRack(rackId))
+    .filter((peer): peer is Rack => peer !== undefined);
+
+  return (["profile", "width", "height"] as const).some((key) => {
+    if (!(key in updates)) return false;
+    const currentValue = bayedInvariantValue(rack, key);
+    const nextValue = bayedInvariantValue(nextRack, key);
+    if (currentValue === nextValue) return false;
+
+    if (peers.length !== peerIds.length || peers.length === 0) return true;
+
+    const currentDisagreements = peers.filter(
+      (peer) => bayedInvariantValue(peer, key) !== currentValue,
+    ).length;
+    const nextDisagreements = peers.filter(
+      (peer) => bayedInvariantValue(peer, key) !== nextValue,
+    ).length;
+    return nextDisagreements >= currentDisagreements;
+  });
+}
 
 // =============================================================================
 // Raw Mutators (for undo/redo system — bypass history)
@@ -615,16 +663,13 @@ export function updateRack(
   const constrainedUpdates = constrainRackProfileUpdates(rack, updates);
   const group = getRackGroupForRack(ctx, id);
 
-  // Profile and rail dimensions describe the whole bay. Reject any direct
-  // member update that would make those persisted fields diverge, including a
-  // profile conversion whose constrained height happens to remain unchanged.
-  const bayedInvariantKeys = ["profile", "width", "height"] as const;
+  // Profile identity and rail dimensions describe the whole bay. A direct
+  // member change is safe only when it strictly reduces disagreements with its
+  // peers. Explicit Generic and an omitted profile share the same physical
+  // identity, so adding the persistence marker is safe without a peer change.
   if (
     group?.layout_preset === "bayed" &&
-    bayedInvariantKeys.some(
-      (key) =>
-        key in constrainedUpdates && constrainedUpdates[key] !== rack[key],
-    )
+    wouldDivergeBayedRack(ctx, rack, group, constrainedUpdates)
   ) {
     layoutDebug.state(
       "updateRack: rejected per-member profile or rail change for bayed rack %s",

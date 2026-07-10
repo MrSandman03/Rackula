@@ -22,6 +22,7 @@ import { generateId } from "$lib/utils/device";
 import { sanitizeFilename } from "$lib/utils/imageUpload";
 import {
   constrainRackProfileUpdates,
+  isRackMateT1Plus,
   withRackProfileDefaults,
 } from "$lib/utils/rack-profile";
 import type { LayoutStateAccess } from "./types";
@@ -523,8 +524,9 @@ export function updateRackRaw(
 
 /**
  * Apply settings already validated and captured by a history command.
- * History replay must preserve undefined optional fields exactly instead of
- * reinterpreting an old rack snapshot as current authoring.
+ * Undefined optional fields are preserved exactly instead of being interpreted
+ * as current authoring, while an explicit named profile still owns its physical
+ * dimensions if unrelated raw mutations occurred between undo and redo.
  */
 export function applyRackSettingsFromHistoryRaw(
   ctx: LayoutStateAccess,
@@ -533,7 +535,12 @@ export function applyRackSettingsFromHistoryRaw(
   const target = getTargetRack(ctx);
   if (!target) return;
 
-  updateRackAtIndex(ctx, target.index, (rack) => ({ ...rack, ...updates }));
+  updateRackAtIndex(ctx, target.index, (rack) => {
+    const nextRack = { ...rack, ...updates };
+    return isRackMateT1Plus(nextRack)
+      ? withRackProfileDefaults(nextRack)
+      : nextRack;
+  });
 }
 
 /**
