@@ -56,7 +56,12 @@
   );
 
   const slotGeometryById = $derived(
-    buildSlotGeometry(slots, containerWidth, containerHeight),
+    buildSlotGeometry(
+      slots,
+      containerWidth,
+      containerHeight,
+      containerType.u_height,
+    ),
   );
 
   /**

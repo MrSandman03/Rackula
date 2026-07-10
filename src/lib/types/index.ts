@@ -340,7 +340,7 @@ export interface Slot {
   position: SlotPosition2D;
   /** Horizontal width as fraction of container width (0.5 = half-width, default: 1.0) */
   width_fraction?: number;
-  /** Slot height in rack units (default: 1) */
+  /** Slot height in rack units. Omitted rows share container height unless another row declares a height. */
   height_units?: number;
   /** Categories of devices this slot accepts (empty = accepts all) */
   accepts?: DeviceCategory[];
@@ -608,6 +608,9 @@ export interface PlacedDevice {
 // Rack Types
 // =============================================================================
 
+/** Persisted rack profile selection. Generic explicitly opts out of inference. */
+export type RackProfile = "generic" | "rackmate-t1-plus";
+
 /**
  * A rack unit container
  */
@@ -620,6 +623,8 @@ export interface Rack {
   height: number;
   /** Width in inches (10, 19, or 23) */
   width: 10 | 19 | 21 | 23;
+  /** Optional named physical profile with fixed dimensions */
+  profile?: RackProfile;
   /** Descending units - if true, U1 is at top (default: false) */
   desc_units: boolean;
   /** Show rear view on canvas (default: true) */
@@ -753,6 +758,7 @@ export interface CreateRackData {
   name: string;
   height: number;
   width?: 10 | 19 | 21 | 23;
+  profile?: RackProfile;
   form_factor?: FormFactor;
   desc_units?: boolean;
   starting_unit?: number;

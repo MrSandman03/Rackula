@@ -37,3 +37,7 @@ Cleanup:
 
 - Target lock released.
 - Remote feature branch deleted by PR merge.
+
+## Post-Merge Audit Addendum
+
+An independent cold review on 2026-07-09 found defects that the original verification did not cover. The remediation is tracked by `exec-20260709-201348-rackmate-post-audit`; see `post-merge-review.md`. The original session remains a historical record and is not retroactively relabeled as reviewed.

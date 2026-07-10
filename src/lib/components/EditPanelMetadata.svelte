@@ -22,7 +22,10 @@
   import { ICON_SIZE } from "$lib/constants/sizing";
   import { canPlaceDevice, findCollisions } from "$lib/utils/collision";
   import { getDeviceDisplayName } from "$lib/utils/device";
-  import { getRackFitSummary } from "$lib/utils/rack-fit";
+  import {
+    getRackFitSummary,
+    getRackulaFitOpenChecks,
+  } from "$lib/utils/rack-fit";
   import type { SelectedDeviceInfo, DeviceFace } from "$lib/types";
 
   interface Props {
@@ -53,14 +56,17 @@
       authoritativeDevice,
       selectedDeviceInfo.rack.width,
       layoutStore.device_types,
+      selectedDeviceInfo.rack.profile,
+      selectedDeviceInfo.rack.depth_mm,
+      selectedDeviceInfo.rack.height,
     ),
   );
-  const rackulaFit = $derived(
-    (authoritativeDevice.custom_fields?.rackula_fit ??
-      selectedDeviceInfo.device.custom_fields?.rackula_fit ??
-      {}) as { open_checks?: string[] },
+  const criticalRackFitSummary = $derived(
+    rackFitSummary?.tone === "warn" || rackFitSummary?.tone === "blocked"
+      ? rackFitSummary
+      : null,
   );
-  const openChecks = $derived(rackulaFit.open_checks ?? []);
+  const openChecks = $derived(getRackulaFitOpenChecks(authoritativeDevice));
 
   // Count of device type facts shown in the collapsible block, so the header can
   // report how many are hidden when collapsed. Type, Brand, Height, Depth, Width
@@ -263,6 +269,7 @@
         placedDevice.position,
         deviceIndex,
         face,
+        device,
       );
 
       if (collisions.length > 0) {
@@ -359,6 +366,17 @@
     {/if}
   </div>
 </section>
+
+{#if criticalRackFitSummary}
+  <aside
+    class="rack-fit-alert rack-fit-alert--{criticalRackFitSummary.tone}"
+    role="status"
+    aria-label="Rack fit warning"
+  >
+    <strong>{criticalRackFitSummary.label}</strong>
+    <span>{criticalRackFitSummary.title}</span>
+  </aside>
+{/if}
 
 <!-- Device type details: read-only reference facts (muted, non-interactive),
      collapsible behind a disclosure toggle. The expanded flag is shared across
@@ -578,6 +596,26 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
+  }
+
+  .rack-fit-alert {
+    display: grid;
+    gap: var(--space-1);
+    margin-bottom: var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid currentColor;
+    border-radius: var(--radius-sm);
+    background: var(--colour-surface-secondary);
+    font-size: var(--font-size-sm);
+    line-height: 1.4;
+  }
+
+  .rack-fit-alert--warn {
+    color: var(--colour-warning);
+  }
+
+  .rack-fit-alert--blocked {
+    color: var(--colour-error);
   }
 
   .group-header {

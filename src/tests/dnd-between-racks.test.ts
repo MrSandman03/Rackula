@@ -7,6 +7,12 @@ import {
   getDropFeedback,
 } from "$lib/utils/dragdrop";
 import { toInternalUnits } from "$lib/utils/position";
+import {
+  resolveDropAction,
+  resolveDropTarget,
+  type DropCoordinateInput,
+  type RackDimensions,
+} from "$lib/utils/rack-drop-coordinator";
 import { getLayoutStore, resetLayoutStore } from "$lib/stores/layout.svelte";
 import { resetHistoryStore } from "$lib/stores/history.svelte";
 import { createTestContainerType, createTestDeviceType } from "./factories";
@@ -329,6 +335,145 @@ describe("DnD Between Racks", () => {
     });
   });
 
+  describe("Cross-rack assembly preview agreement", () => {
+    const dims: RackDimensions = {
+      rackHeight: 12,
+      rackWidth: 220,
+      interiorWidth: 186,
+      uHeight: 22,
+      rackPadding: 0,
+      railWidth: 17,
+    };
+    const svgElement = {
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        width: 220,
+        height: 264,
+      }),
+      viewBox: {
+        baseVal: { x: 0, y: 0, width: 220, height: 264 },
+      },
+    } as unknown as SVGSVGElement;
+    const coords: DropCoordinateInput = {
+      svgElement,
+      clientX: 100,
+      clientY: 200,
+    };
+    const carrier = createTestContainerType({
+      slug: "portable-carrier",
+      u_height: 1,
+      rack_widths: [10, 19],
+      is_full_depth: false,
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+      ],
+    });
+    const deepChild: DeviceType = {
+      ...createTestDeviceType({
+        slug: "deep-portable-child",
+        rack_widths: [10, 19],
+        slot_width: 2,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 300, height: 40 },
+        },
+      },
+    };
+    const sourceRack: Rack = {
+      ...targetRack,
+      id: "source-rack",
+      depth_mm: 1000,
+      devices: [
+        pd("carrier", carrier.slug, 1, "front"),
+        {
+          ...pd("deep-child", deepChild.slug, 1, "front"),
+          position: 0,
+          container_id: "carrier",
+          slot_id: "main",
+        },
+      ],
+    };
+    const shallowTarget: Rack = {
+      ...targetRack,
+      id: "target-rack",
+      width: 10,
+      depth_mm: 260,
+      devices: [],
+    };
+    const library = [carrier, deepChild];
+    const dragData = createRackDeviceDragData(carrier, sourceRack.id!, 0);
+
+    it("blocks the preview when a child makes the assembly too deep", () => {
+      const result = resolveDropTarget(
+        coords,
+        dims,
+        shallowTarget,
+        library,
+        carrier,
+        "front",
+        undefined,
+        { rack: sourceRack, deviceIndex: 0 },
+      );
+
+      expect(result.feedback).toBe("blocked");
+      expect(result.dropPreview.feedback).toBe("blocked");
+    });
+
+    it("resolves the same rejected assembly to an invalid action", () => {
+      const action = resolveDropAction(
+        coords,
+        dims,
+        shallowTarget,
+        library,
+        dragData,
+        "front",
+        false,
+        sourceRack,
+      );
+
+      expect(action).toMatchObject({
+        kind: "invalid",
+        feedback: "blocked",
+        message: "Device assembly doesn't fit this rack",
+      });
+    });
+
+    it("does not nest a moved carrier inside a target carrier", () => {
+      const occupiedTarget: Rack = {
+        ...shallowTarget,
+        depth_mm: 1000,
+        devices: [pd("target-carrier", carrier.slug, 3, "front")],
+      };
+
+      const action = resolveDropAction(
+        coords,
+        dims,
+        occupiedTarget,
+        library,
+        dragData,
+        "front",
+        false,
+        sourceRack,
+      );
+
+      expect(action.kind).toBe("invalid");
+      expect(action.kind).not.toBe("container-drop");
+      expect(sourceRack.devices.map((device) => device.id)).toEqual([
+        "carrier",
+        "deep-child",
+      ]);
+      expect(sourceRack.devices[1]?.container_id).toBe("carrier");
+    });
+  });
+
   describe("Cross-rack move execution", () => {
     let store: ReturnType<typeof getLayoutStore>;
     let rackA: Rack & { id: string };
@@ -367,7 +512,7 @@ describe("DnD Between Racks", () => {
       const moved = findDevice(store.getRackById(rackB.id)!, serverType.slug);
       expect(moved).toBeDefined();
       expect(moved!.position).toBe(toInternalUnits(10));
-      expect(moved!.face).toBe("front");
+      expect(moved!.face).toBe("both");
     });
 
     it("undoes cross-rack move back to source rack", () => {
@@ -402,12 +547,21 @@ describe("DnD Between Racks", () => {
       ).toBeDefined();
     });
 
-    it("assigns face from drop target", () => {
-      store.placeDevice(rackA.id, serverType.slug, 5);
+    it("assigns the drop target face to a half-depth device", () => {
+      const halfDepthType = createTestDeviceType({
+        slug: "half-depth-server",
+        u_height: 2,
+        is_full_depth: false,
+      });
+      store.addDeviceTypeRaw(halfDepthType);
+      store.placeDevice(rackA.id, halfDepthType.slug, 5);
 
       store.moveDeviceToRack(rackA.id, 0, rackB.id, 10, "rear");
 
-      const moved = findDevice(store.getRackById(rackB.id)!, serverType.slug);
+      const moved = findDevice(
+        store.getRackById(rackB.id)!,
+        halfDepthType.slug,
+      );
       expect(moved!.face).toBe("rear");
     });
 
@@ -507,6 +661,135 @@ describe("DnD Between Racks", () => {
         .devices.find((d) => d.container_id === movedParent!.id);
       expect(movedChild).toBeDefined();
     });
+
+    it("rejects moving a deep container assembly into a shallow rack", () => {
+      const containerType = createTestContainerType({
+        slug: "deep-shelf",
+        u_height: 1,
+        is_full_depth: false,
+        slots: [
+          {
+            id: "main",
+            position: { row: 0, col: 0 },
+            width_fraction: 1,
+            height_units: 1,
+          },
+        ],
+      });
+      const childType: DeviceType = {
+        ...createTestDeviceType({
+          slug: "deep-child",
+          u_height: 1,
+          slot_width: 2,
+          is_full_depth: false,
+        }),
+        custom_fields: {
+          rackula_fit: {
+            dimensions_mm: { width: 200, depth: 300, height: 40 },
+          },
+        },
+      };
+      store.addDeviceTypeRaw(containerType);
+      store.addDeviceTypeRaw(childType);
+      store.updateRack(rackA.id, { depth_mm: 1000 });
+      store.updateRack(rackB.id, { depth_mm: 260 });
+      expect(store.placeDevice(rackA.id, containerType.slug, 5)).toBe(true);
+      const container = store.getRackById(rackA.id)!.devices[0]!;
+      expect(
+        store.placeInContainer(
+          rackA.id,
+          childType.slug,
+          container.id,
+          "main",
+          0,
+        ),
+      ).toBe(true);
+
+      const result = store.moveDeviceToRack(rackA.id, 0, rackB.id, 10, "front");
+
+      expect(result).toBe(false);
+      expect(findDevice(store.getRackById(rackA.id)!, containerType.slug)).toBe(
+        container,
+      );
+      expect(
+        findDevice(store.getRackById(rackB.id)!, containerType.slug),
+      ).toBeUndefined();
+    });
+
+    it.each([
+      {
+        name: "rack-width-incompatible",
+        rackWidths: [19] as DeviceType["rack_widths"],
+        widthMm: 100,
+      },
+      {
+        name: "physically over-wide",
+        rackWidths: [10, 19] as DeviceType["rack_widths"],
+        widthMm: 300,
+      },
+    ])(
+      "rejects moving an assembly with a $name child",
+      ({ rackWidths, widthMm }) => {
+        const containerType = createTestContainerType({
+          slug: `portable-tray-${widthMm}`,
+          u_height: 1,
+          rack_widths: [10, 19],
+          is_full_depth: false,
+          slots: [
+            {
+              id: "main",
+              position: { row: 0, col: 0 },
+              width_fraction: 1,
+              height_units: 1,
+            },
+          ],
+        });
+        const childType: DeviceType = {
+          ...createTestDeviceType({
+            slug: `portable-child-${widthMm}-${rackWidths?.join("-")}`,
+            u_height: 1,
+            slot_width: 2,
+            rack_widths: rackWidths,
+            is_full_depth: false,
+          }),
+          custom_fields: {
+            rackula_fit: {
+              dimensions_mm: { width: widthMm, depth: 100, height: 40 },
+            },
+          },
+        };
+        store.addDeviceTypeRaw(containerType);
+        store.addDeviceTypeRaw(childType);
+        store.updateRack(rackB.id, { width: 10 });
+        expect(store.placeDevice(rackA.id, containerType.slug, 5)).toBe(true);
+        const container = store.getRackById(rackA.id)!.devices[0]!;
+        expect(
+          store.placeInContainer(
+            rackA.id,
+            childType.slug,
+            container.id,
+            "main",
+            0,
+          ),
+        ).toBe(true);
+
+        const result = store.moveDeviceToRack(
+          rackA.id,
+          0,
+          rackB.id,
+          10,
+          "front",
+        );
+
+        expect(result).toBe(false);
+        expect(
+          findDevice(store.getRackById(rackA.id)!, containerType.slug),
+        ).toBe(container);
+        expect(
+          findDevice(store.getRackById(rackB.id)!, containerType.slug),
+        ).toBeUndefined();
+      },
+    );
 
     /**
      * Place a container in rack A with a child device inside its slot.

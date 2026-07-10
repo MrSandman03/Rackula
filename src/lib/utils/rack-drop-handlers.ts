@@ -58,6 +58,8 @@ export interface DropDispatchContext {
   coords?: DropCoordinateInput;
   /** Required for container-drop fallback re-resolution. */
   dims?: RackDimensions;
+  /** Source rack for validating a cross-rack assembly fallback. */
+  sourceRack?: Rack;
 }
 
 /**
@@ -108,24 +110,26 @@ export function dispatchDropAction(
     case "container-drop": {
       if (!collisionContext?.layoutStore) break;
       const { layoutStore } = collisionContext;
-      const success = layoutStore.placeInContainer(
-        action.rackId,
-        action.slug,
-        action.containerTarget.containerId,
-        action.containerTarget.slotId,
-        action.containerTarget.position,
-      );
+      const success =
+        action.dragData.type === "rack-device" &&
+        action.dragData.sourceRackId &&
+        action.dragData.sourceIndex !== undefined
+          ? layoutStore.moveDeviceIntoContainer(
+              action.dragData.sourceRackId,
+              action.dragData.sourceIndex,
+              action.rackId,
+              action.containerTarget.containerId,
+              action.containerTarget.slotId,
+              action.containerTarget.position,
+            )
+          : layoutStore.placeInContainer(
+              action.rackId,
+              action.slug,
+              action.containerTarget.containerId,
+              action.containerTarget.slotId,
+              action.containerTarget.position,
+            );
       if (success) {
-        if (
-          action.dragData.type === "rack-device" &&
-          action.dragData.sourceRackId &&
-          action.dragData.sourceIndex !== undefined
-        ) {
-          layoutStore.removeDeviceFromRack(
-            action.dragData.sourceRackId,
-            action.dragData.sourceIndex,
-          );
-        }
         break;
       }
       // Container placement failed — re-resolve without container detection
@@ -138,6 +142,7 @@ export function dispatchDropAction(
           action.dragData,
           collisionContext.faceFilter,
           true, // skip container detection
+          collisionContext.sourceRack,
         );
         dispatchDropAction(fallbackAction, callbacks, collisionContext);
       }
@@ -146,12 +151,23 @@ export function dispatchDropAction(
     case "carrier-drop": {
       if (!collisionContext?.layoutStore) break;
       const { layoutStore } = collisionContext;
-      const success = layoutStore.placeDeviceSmart(
-        action.rackId,
-        action.slug,
-        action.targetU,
-        action.face,
-      );
+      const success =
+        action.dragData.type === "rack-device" &&
+        action.dragData.sourceRackId &&
+        action.dragData.sourceIndex !== undefined
+          ? layoutStore.moveDeviceWithSmartCarrier(
+              action.dragData.sourceRackId,
+              action.dragData.sourceIndex,
+              action.rackId,
+              action.targetU,
+              action.face,
+            )
+          : layoutStore.placeDeviceSmart(
+              action.rackId,
+              action.slug,
+              action.targetU,
+              action.face,
+            );
       if (!success) {
         hapticError();
         collisionContext.toastStore.showToast(
@@ -160,16 +176,6 @@ export function dispatchDropAction(
           3000,
         );
         break;
-      }
-      if (
-        action.dragData.type === "rack-device" &&
-        action.dragData.sourceRackId &&
-        action.dragData.sourceIndex !== undefined
-      ) {
-        layoutStore.removeDeviceFromRack(
-          action.dragData.sourceRackId,
-          action.dragData.sourceIndex,
-        );
       }
       break;
     }
@@ -188,6 +194,7 @@ export function dispatchDropAction(
             action.targetU,
             action.excludeIndex,
             collisionContext.faceFilter,
+            action.deviceType,
           );
         if (message) {
           collisionContext.toastStore.showToast(message, "warning", 3000);

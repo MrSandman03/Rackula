@@ -3,6 +3,7 @@ import {
   createPlaceDeviceCommand,
   createMoveDeviceCommand,
   createRemoveDeviceCommand,
+  createRemoveDeviceAssemblyCommand,
   createUpdateDeviceFaceCommand,
   type DeviceCommandStore,
 } from "$lib/stores/commands/device";
@@ -236,6 +237,55 @@ describe("Device Commands", () => {
       expect(store.placeDeviceRaw).toHaveBeenCalledWith(
         expect.objectContaining({ position: toInternalUnits(15) }),
       );
+    });
+  });
+
+  describe("createRemoveDeviceAssemblyCommand", () => {
+    it("restores the exact device roster on undo and reapplies deletion on redo", () => {
+      const before = [
+        createTestDevice({ id: "before" }),
+        createTestDevice({ id: "carrier" }),
+        createTestDevice({
+          id: "child",
+          container_id: "carrier",
+          slot_id: "main",
+        }),
+        createTestDevice({ id: "after" }),
+      ];
+      const after = [before[0]!, before[3]!];
+      const restoreRackDevicesRaw = vi.fn();
+      const getCables = vi.fn().mockReturnValue([]);
+      const insertCableRaw = vi.fn();
+      const removeCableRaw = vi.fn();
+      const command = createRemoveDeviceAssemblyCommand(
+        before,
+        after,
+        [before[1]!, before[2]!],
+        {
+          restoreRackDevicesRaw,
+          getCables,
+          insertCableRaw,
+          removeCableRaw,
+        },
+        "Carrier",
+      );
+
+      command.execute();
+      command.undo();
+      command.execute();
+
+      expect(command.type).toBe("REMOVE_DEVICE");
+      expect(command.description).toBe("Remove Carrier");
+      expect(restoreRackDevicesRaw.mock.calls).toEqual([
+        [after],
+        [before],
+        [after],
+      ]);
+      expect(restoreRackDevicesRaw.mock.calls[1]?.[0][2]).toMatchObject({
+        id: "child",
+        container_id: "carrier",
+        slot_id: "main",
+      });
     });
   });
 

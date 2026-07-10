@@ -7,6 +7,7 @@
   import { getLayoutStore } from "$lib/stores/layout.svelte";
   import { getSelectionStore } from "$lib/stores/selection.svelte";
   import { isCustomDevice } from "$lib/utils/device-lookup";
+  import ConfirmDialog from "./ConfirmDialog.svelte";
   import type { SelectedDeviceInfo } from "$lib/types";
 
   interface Props {
@@ -18,19 +19,43 @@
 
   const layoutStore = getLayoutStore();
   const selectionStore = getSelectionStore();
+  let confirmAssemblyRemoval = $state(false);
 
   // Check if selected device is a custom (user-created) device
   const isSelectedDeviceCustom = $derived.by(() =>
     isCustomDevice(selectedDeviceInfo.device.slug),
   );
 
-  // Remove device from rack
-  function handleRemoveDevice() {
+  const childCount = $derived(
+    selectedDeviceInfo.rack.devices.filter(
+      (device) => device.container_id === selectedDeviceInfo.placedDevice.id,
+    ).length,
+  );
+  const deviceName = $derived(
+    selectedDeviceInfo.placedDevice.name ??
+      selectedDeviceInfo.device.model ??
+      selectedDeviceInfo.device.slug,
+  );
+
+  function removeDevice() {
     layoutStore.removeDeviceFromRack(
       selectedDeviceInfo.rack.id,
       selectedDeviceInfo.deviceIndex,
     );
     selectionStore.clearSelection();
+  }
+
+  function handleRemoveDevice() {
+    if (childCount > 0) {
+      confirmAssemblyRemoval = true;
+      return;
+    }
+    removeDevice();
+  }
+
+  function handleConfirmAssemblyRemoval() {
+    confirmAssemblyRemoval = false;
+    removeDevice();
   }
 </script>
 
@@ -54,6 +79,15 @@
     </button>
   {/if}
 </div>
+
+<ConfirmDialog
+  open={confirmAssemblyRemoval}
+  title="Remove Carrier Assembly"
+  message={`Remove "${deviceName}" and ${childCount} mounted ${childCount === 1 ? "device" : "devices"} from this rack?`}
+  confirmLabel={`Remove ${childCount + 1} devices`}
+  onconfirm={handleConfirmAssemblyRemoval}
+  oncancel={() => (confirmAssemblyRemoval = false)}
+/>
 
 <style>
   .actions {

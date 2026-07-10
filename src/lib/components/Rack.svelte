@@ -28,19 +28,20 @@
   import RackDropZone from "./RackDropZone.svelte";
   import RackChristmasHat from "./RackChristmasHat.svelte";
   import DeviceContextMenu from "./DeviceContextMenu.svelte";
-  import {
-    getDropFeedback,
-    type ContainerHoverInfo,
-  } from "$lib/utils/dragdrop";
+  import { type ContainerHoverInfo } from "$lib/utils/dragdrop";
   import { getToastStore } from "$lib/stores/toast.svelte";
   import { getLayoutStore } from "$lib/stores/layout.svelte";
   import { getSelectionStore } from "$lib/stores/selection.svelte";
   import { getCanvasStore } from "$lib/stores/canvas.svelte";
   import { getBlockedSlots } from "$lib/utils/blocked-slots";
+  import { isContainerChild } from "$lib/utils/collision";
   import { isChristmas } from "$lib/utils/christmas";
   import { getViewportStore } from "$lib/utils/viewport.svelte";
   import { getPlacementStore } from "$lib/stores/placement.svelte";
-  import { validStartPositions } from "$lib/utils/placement-keyboard";
+  import {
+    keyboardPlacementPreview,
+    validStartPositions,
+  } from "$lib/utils/placement-keyboard";
   import { SvelteSet, SvelteMap } from "svelte/reactivity";
   import { fade } from "svelte/transition";
   import { prefersReducedMotion } from "svelte/motion";
@@ -54,7 +55,10 @@
     NAME_Y_OFFSET as NAME_Y_OFFSET_CONST,
   } from "$lib/constants/layout";
   import { type RackDimensions } from "$lib/utils/rack-drop-coordinator";
-  import { createContextMenuActions } from "$lib/utils/rack-context-actions";
+  import {
+    createContextMenuActions,
+    type ContextMenuTarget,
+  } from "$lib/utils/rack-context-actions";
   import { type RackEventCallbacks } from "$lib/utils/rack-drop-handlers";
   import {
     handleDragOver as onDragOver,
@@ -164,12 +168,7 @@
 
   // --- Context menu state ---
   let contextMenuOpen = $state(false);
-  let contextMenuTarget = $state<{
-    rackId: string;
-    deviceIndex: number;
-    x: number;
-    y: number;
-  } | null>(null);
+  let contextMenuTarget = $state<ContextMenuTarget | null>(null);
 
   // Cleanup timeout on unmount
   $effect(() => {
@@ -236,6 +235,24 @@
     },
   );
 
+  const contextMenuDevice = $derived(
+    contextMenuTarget
+      ? rack.devices.find((device) => device.id === contextMenuTarget?.deviceId)
+      : undefined,
+  );
+  const contextMenuTargetsChild = $derived(
+    contextMenuDevice ? isContainerChild(contextMenuDevice) : false,
+  );
+  const contextMenuCanMoveToNextSlot = $derived(
+    contextMenuTarget && contextMenuTargetsChild
+      ? contextActions.getCanMoveToNextSlot(
+          rack,
+          deviceLibrary,
+          contextMenuTarget,
+        )
+      : false,
+  );
+
   // --- Derived data for rendering ---
   const uLabels = $derived(
     Array.from({ length: rack.height }, (_, i) => {
@@ -290,7 +307,6 @@
     if (!isPlacementMode || !placementStore.pendingDevice)
       return new SvelteSet<number>();
     const device = placementStore.pendingDevice;
-    const deviceHeight = device.u_height;
     // Reuse the keyboard cursor's valid-start scan so the highlight and the
     // keyboard cursor agree by construction; expand each valid start into the
     // U-slots the device would occupy.
@@ -301,7 +317,14 @@
       device,
       effectiveFaceFilter,
     )) {
-      for (let u = startU; u < startU + deviceHeight; u++) validSlots.add(u);
+      const preview = keyboardPlacementPreview(
+        rack,
+        deviceLibrary,
+        device,
+        startU,
+        effectiveFaceFilter,
+      );
+      for (let u = startU; u < startU + preview.height; u++) validSlots.add(u);
     }
     return validSlots;
   });
@@ -321,18 +344,17 @@
     if (effectiveFaceFilter !== placementStore.targetFace) return null;
     const position = placementStore.cursorPosition;
     if (position == null) return null;
-    const { u_height: deviceHeight } = placementStore.pendingDevice;
+    const preview = keyboardPlacementPreview(
+      rack,
+      deviceLibrary,
+      placementStore.pendingDevice,
+      position,
+      effectiveFaceFilter,
+    );
     return {
       position,
-      height: deviceHeight,
-      feedback: getDropFeedback(
-        rack,
-        deviceLibrary,
-        deviceHeight,
-        position,
-        undefined,
-        effectiveFaceFilter,
-      ),
+      height: preview.height,
+      feedback: preview.feedback,
     };
   });
 
@@ -385,6 +407,12 @@
       justFinishedDrag = false;
       dragDebounceTimeout = null;
     }, DRAG_CLICK_DEBOUNCE_MS);
+  }
+
+  function finishDeviceDrag() {
+    setDropPreviewIfChanged(null);
+    containerHoverInfo = null;
+    setDragFinished();
   }
 
   // --- Custom pointer drag listeners (Safari #397 fix) ---
@@ -554,10 +582,11 @@
               isDragTargetValid={isHoveredContainer &&
                 (containerHoverInfo?.isValidTarget ?? false)}
               onselect={ondeviceselect}
-              ondragend={() => setDragFinished()}
+              ondragend={finishDeviceDrag}
               onduplicate={(e) =>
                 contextActions.handleDuplicate(rack, {
                   ...e.detail,
+                  deviceId: placedDevice.id,
                   x: 0,
                   y: 0,
                 })}
@@ -579,7 +608,9 @@
         text-anchor="middle"
         role="note"
       >
-        No {faceFilter}-facing or full-depth devices
+        {rack.width === 10
+          ? `${faceFilter === "front" ? "Front" : "Rear"} empty`
+          : `No ${faceFilter}-facing or full-depth devices`}
       </text>
     {/if}
 
@@ -605,27 +636,33 @@
 </div>
 
 <!-- Device context menu (rendered outside SVG for proper DOM layering) -->
-{#if contextMenuOpen && contextMenuTarget}
+{#if contextMenuOpen && contextMenuTarget && contextMenuDevice}
   <DeviceContextMenu
     open={contextMenuOpen}
     x={contextMenuTarget.x}
     y={contextMenuTarget.y}
     onedit={() => ctxMenu.handleEdit(rack)}
-    onduplicate={() => ctxMenu.handleDuplicate(rack)}
-    onmoveup={() => ctxMenu.handleMoveUp(rack, deviceLibrary)}
-    onmovedown={() => ctxMenu.handleMoveDown(rack)}
-    onflip={() => ctxMenu.handleFlip(rack)}
+    onduplicate={contextMenuTargetsChild
+      ? undefined
+      : () => ctxMenu.handleDuplicate(rack)}
+    onmoveup={contextMenuTargetsChild
+      ? undefined
+      : () => ctxMenu.handleMoveUp(rack, deviceLibrary)}
+    onmovedown={contextMenuTargetsChild
+      ? undefined
+      : () => ctxMenu.handleMoveDown(rack)}
+    onflip={contextMenuTargetsChild
+      ? undefined
+      : () => ctxMenu.handleFlip(rack)}
+    onmoveslot={contextMenuCanMoveToNextSlot
+      ? () => ctxMenu.handleMoveToNextSlot()
+      : undefined}
     ondelete={() => ctxMenu.handleDelete()}
-    canMoveUp={contextActions.getCanMoveUp(
-      rack,
-      deviceLibrary,
-      contextMenuTarget.deviceIndex,
-    )}
-    canMoveDown={contextActions.getCanMoveDown(
-      rack,
-      deviceLibrary,
-      contextMenuTarget.deviceIndex,
-    )}
+    containerChild={contextMenuTargetsChild}
+    canMoveUp={!contextMenuTargetsChild &&
+      contextActions.getCanMoveUp(rack, deviceLibrary, contextMenuTarget)}
+    canMoveDown={!contextMenuTargetsChild &&
+      contextActions.getCanMoveDown(rack, deviceLibrary, contextMenuTarget)}
     onOpenChange={(open) => {
       if (!open) ctxMenu.close();
     }}

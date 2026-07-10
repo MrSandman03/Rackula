@@ -26,6 +26,31 @@ const ARTIFACT_PATH = join(
   "rackula-layout.schema.json",
 );
 
+function findRackMateRackSchemas(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) {
+    return value.flatMap(findRackMateRackSchemas);
+  }
+  if (!value || typeof value !== "object") return [];
+
+  const schema = value as Record<string, unknown>;
+  const properties = schema.properties as Record<string, unknown> | undefined;
+  const profile = properties?.profile as Record<string, unknown> | undefined;
+  const profileValues = Array.isArray(profile?.enum)
+    ? profile.enum
+    : [profile?.const];
+  const matchesRackShape =
+    schema.type === "object" &&
+    profileValues.includes("rackmate-t1-plus") &&
+    properties?.height !== undefined &&
+    properties?.width !== undefined &&
+    properties?.depth_mm !== undefined;
+
+  return [
+    ...(matchesRackShape ? [schema] : []),
+    ...Object.values(schema).flatMap(findRackMateRackSchemas),
+  ];
+}
+
 describe("layout JSON Schema artifact", () => {
   const raw = readFileSync(ARTIFACT_PATH, "utf8");
   const artifact = JSON.parse(raw) as Record<string, unknown>;
@@ -47,5 +72,36 @@ describe("layout JSON Schema artifact", () => {
     expect(artifact.$schema).toBe(JSON_SCHEMA_DIALECT);
     expect(artifact.$id).toBe(SCHEMA_ID);
     expect(artifact.$description).toBe(SCHEMA_DESCRIPTION);
+  });
+
+  it("constrains every RackMate profile rack to its physical envelope", () => {
+    const rackSchemas = findRackMateRackSchemas(artifact);
+
+    // The public layout accepts both legacy `rack` and modern `racks[]` input.
+    // eslint-disable-next-line no-restricted-syntax
+    expect(rackSchemas).toHaveLength(2);
+    for (const rackSchema of rackSchemas) {
+      expect(
+        (rackSchema.properties as Record<string, unknown>).profile,
+      ).toEqual({
+        enum: ["generic", "rackmate-t1-plus"],
+        type: "string",
+      });
+      expect(rackSchema.allOf).toContainEqual({
+        if: {
+          properties: {
+            profile: { const: "rackmate-t1-plus" },
+          },
+          required: ["profile"],
+        },
+        then: {
+          properties: {
+            depth_mm: { const: 260, default: 260, type: "number" },
+            height: { const: 8, type: "integer" },
+            width: { const: 10, type: "number" },
+          },
+        },
+      });
+    }
   });
 });

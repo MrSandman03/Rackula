@@ -1,0 +1,81 @@
+metadata:
+  id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+  name: Pre-Strict Child Fit
+  schema_version: "1.0"
+version: "26.6.6"
+name: Pre-Strict Child Fit
+racks:
+  - id: rack-fit
+    name: Generic Rack
+    height: 8
+    width: 19
+    depth_mm: 1000
+    desc_units: false
+    show_rear: true
+    form_factor: 4-post-cabinet
+    starting_unit: 1
+    position: 0
+    devices:
+      - id: legacy-fit-container
+        device_type: legacy-fit-container-type
+        position: 6
+        face: front
+      - id: legacy-tall-child
+        device_type: legacy-tall-child-type
+        position: 0
+        face: front
+        container_id: legacy-fit-container
+        slot_id: bottom
+      - id: legacy-width-child
+        device_type: legacy-width-child-type
+        position: 0
+        face: front
+        container_id: legacy-fit-container
+        slot_id: top
+device_types:
+  - slug: legacy-fit-container-type
+    model: Legacy Two Row Container
+    u_height: 2
+    rack_widths: [19]
+    is_full_depth: false
+    colour: "#425466"
+    category: chassis
+    subdevice_role: parent
+    slots:
+      - id: bottom
+        position:
+          row: 0
+          col: 0
+        width_fraction: 1
+        height_units: 1
+      - id: top
+        position:
+          row: 1
+          col: 0
+        width_fraction: 1
+        height_units: 1
+  - slug: legacy-tall-child-type
+    model: Legacy Tall Child
+    u_height: 1
+    rack_widths: [19]
+    is_full_depth: false
+    colour: "#657789"
+    category: server
+    subdevice_role: child
+    custom_fields:
+      rackula_fit:
+        dimensions_mm:
+          width: 100
+          depth: 100
+          height: 50
+  - slug: legacy-width-child-type
+    model: Legacy Width Child
+    u_height: 1
+    rack_widths: [21]
+    is_full_depth: false
+    colour: "#78899A"
+    category: network
+    subdevice_role: child
+settings:
+  display_mode: label
+  show_labels_on_images: false

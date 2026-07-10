@@ -19,6 +19,8 @@
     onchange?: (value: T) => void;
     /** Accessible label for the control group */
     ariaLabel?: string;
+    /** Element containing contextual help or validation feedback */
+    ariaDescribedBy?: string;
     /** Size variant */
     size?: ControlSize;
     /** Whether the whole control is disabled */
@@ -30,6 +32,7 @@
     value,
     onchange,
     ariaLabel,
+    ariaDescribedBy,
     size = "default",
     disabled = false,
   }: Props = $props();
@@ -45,6 +48,7 @@
   class:small={size === "small"}
   role="group"
   aria-label={ariaLabel}
+  aria-describedby={ariaDescribedBy}
 >
   {#each options as option, i (option.value)}
     <button

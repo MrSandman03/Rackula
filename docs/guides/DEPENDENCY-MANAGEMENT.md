@@ -2,33 +2,23 @@
 
 ## Overview
 
-Rackula uses Dependabot for automated dependency updates with a tiered auto-merge strategy based on risk level.
+Rackula uses Dependabot to open dependency update pull requests. Dependency changes never merge automatically: every PR must pass applicable checks, receive independent review, and receive explicit human merge approval.
 
 ## Configuration
 
 - **Location**: `.github/dependabot.yml`
-- **Auto-merge workflow**: `.github/workflows/dependabot-auto-merge.yml`
+- **Merge policy**: the review and merge gate in `CLAUDE.md`
 
 ## Update Strategy
 
-### Tier 1: Auto-Merge (No Human Review)
+All update types require human approval. Review depth scales with risk:
 
-These updates merge automatically after CI passes:
-
-| Update Type            | Examples                     |
-| ---------------------- | ---------------------------- |
-| Patch versions (any)   | `1.2.3` → `1.2.4`            |
-| Minor dev dependencies | `vitest 4.0.0` → `4.1.0`     |
-| GitHub Actions (any)   | `actions/checkout@v4` → `v5` |
-
-### Tier 2: Manual Review Required
-
-These require human approval:
-
-| Update Type           | Reason                        |
-| --------------------- | ----------------------------- |
-| Major versions        | Breaking changes possible     |
-| Minor production deps | Could affect runtime behavior |
+| Update Type    | Required review focus                               |
+| -------------- | --------------------------------------------------- |
+| Patch versions | Changelog, lockfile scope, focused tests            |
+| Minor versions | API changes, behavior changes, full applicable CI   |
+| Major versions | Migration plan, breaking changes, full verification |
+| GitHub Actions | Action provenance, pinned SHA, permission changes   |
 
 ## Package Grouping
 
@@ -46,20 +36,21 @@ Related packages are grouped to prevent version mismatches:
 - **npm packages**: Daily (prevents batch accumulation)
 - **GitHub Actions**: Weekly on Mondays
 
-## Handling Major Updates
+## Handling Updates
 
-When major version PRs arrive:
+When dependency PRs arrive:
 
 1. Read the changelog/release notes
 2. Check for breaking changes that affect our usage
 3. Test locally: `npm install <package>@latest && npm test`
-4. Merge if tests pass
+4. Record the independent review verdict and exact SHA
+5. Merge only after applicable checks pass and a human explicitly approves
 
 ## Troubleshooting
 
 ### "claude-review" check failing on Dependabot PRs
 
-This is expected. The Claude Code Review workflow skips Dependabot PRs because GitHub doesn't expose secrets to them (security feature). CodeRabbit still reviews these PRs.
+This is expected. The Claude Code Review workflow skips Dependabot PRs because GitHub does not expose secrets to them. Rely on the dependency, build, and test checks, then require maintainer review before merge.
 
 ### Multiple related PRs not grouped
 

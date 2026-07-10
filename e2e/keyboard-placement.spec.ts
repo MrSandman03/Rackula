@@ -16,7 +16,7 @@ import {
   gotoWithRack,
   SMALL_RACK_SHARE,
   createRackDirect,
-  paletteItemByName,
+  paletteSelectButtonByName,
   locators,
 } from "./helpers";
 
@@ -28,7 +28,7 @@ const placementBanner = '[data-testid="rack-canvas"] [role="status"]';
 // because the alphabetized palette's first item is an unplaceable half-width
 // device (#2851).
 async function armServerForKeyboard(page: Page) {
-  const serverDevice = paletteItemByName(page, "Server").first();
+  const serverDevice = paletteSelectButtonByName(page, "Server").first();
   await expect(serverDevice).toBeVisible();
   await serverDevice.focus();
   return serverDevice;

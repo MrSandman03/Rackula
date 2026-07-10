@@ -602,6 +602,37 @@
     },
     "rack": {
       "additionalProperties": {},
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "profile": {
+                "const": "rackmate-t1-plus"
+              }
+            },
+            "required": [
+              "profile"
+            ]
+          },
+          "then": {
+            "properties": {
+              "depth_mm": {
+                "const": 260,
+                "default": 260,
+                "type": "number"
+              },
+              "height": {
+                "const": 8,
+                "type": "integer"
+              },
+              "width": {
+                "const": 10,
+                "type": "number"
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "base_weight": {
           "default": 0,
@@ -787,6 +818,13 @@
           "minimum": 0,
           "type": "integer"
         },
+        "profile": {
+          "enum": [
+            "generic",
+            "rackmate-t1-plus"
+          ],
+          "type": "string"
+        },
         "show_rear": {
           "default": true,
           "type": "boolean"
@@ -868,6 +906,37 @@
     "racks": {
       "items": {
         "additionalProperties": {},
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "profile": {
+                  "const": "rackmate-t1-plus"
+                }
+              },
+              "required": [
+                "profile"
+              ]
+            },
+            "then": {
+              "properties": {
+                "depth_mm": {
+                  "const": 260,
+                  "default": 260,
+                  "type": "number"
+                },
+                "height": {
+                  "const": 8,
+                  "type": "integer"
+                },
+                "width": {
+                  "const": 10,
+                  "type": "number"
+                }
+              }
+            }
+          }
+        ],
         "properties": {
           "base_weight": {
             "default": 0,
@@ -1052,6 +1121,13 @@
             "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer"
+          },
+          "profile": {
+            "enum": [
+              "generic",
+              "rackmate-t1-plus"
+            ],
+            "type": "string"
           },
           "show_rear": {
             "default": true,

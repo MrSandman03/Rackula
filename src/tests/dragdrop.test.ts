@@ -435,6 +435,94 @@ describe("Drag and Drop Utilities", () => {
       expect(target?.slotId).toBe("r0-c1");
     });
 
+    it("uses each row's declared widths for asymmetric column targeting", () => {
+      const asymmetricCarrier: DeviceType = {
+        ...createTestDeviceType({
+          slug: "asymmetric-carrier",
+          u_height: 2,
+          is_full_depth: false,
+        }),
+        slots: [
+          {
+            id: "bottom-left",
+            position: { row: 0, col: 0 },
+            width_fraction: 0.25,
+            height_units: 0.5,
+          },
+          {
+            id: "bottom-right",
+            position: { row: 0, col: 1 },
+            width_fraction: 0.75,
+            height_units: 0.5,
+          },
+          {
+            id: "top-left",
+            position: { row: 1, col: 0 },
+            width_fraction: 0.75,
+            height_units: 1.5,
+          },
+          {
+            id: "top-right",
+            position: { row: 1, col: 1 },
+            width_fraction: 0.25,
+            height_units: 1.5,
+          },
+        ],
+      };
+      const rack = rackWithCarrier();
+      rack.devices[0]!.device_type = asymmetricCarrier.slug;
+
+      const target = detectContainerDropTarget(
+        rack,
+        [asymmetricCarrier, child],
+        child,
+        140,
+        100,
+        RACK_WIDTH,
+        12,
+        U_HEIGHT,
+      );
+
+      expect(target?.slotId).toBe("top-left");
+    });
+
+    it("uses declared row heights for asymmetric row targeting", () => {
+      const asymmetricCarrier: DeviceType = {
+        ...createTestDeviceType({
+          slug: "asymmetric-carrier",
+          u_height: 2,
+          is_full_depth: false,
+        }),
+        slots: [
+          {
+            id: "bottom",
+            position: { row: 0, col: 0 },
+            height_units: 0.5,
+          },
+          {
+            id: "top",
+            position: { row: 1, col: 0 },
+            height_units: 1.5,
+          },
+        ],
+      };
+      const rack = rackWithCarrier();
+      rack.devices[0]!.device_type = asymmetricCarrier.slug;
+
+      const target = detectContainerDropTarget(
+        rack,
+        [asymmetricCarrier, child],
+        child,
+        160,
+        40,
+        RACK_WIDTH,
+        12,
+        U_HEIGHT,
+      );
+
+      expect(target?.slotId).toBe("top");
+    });
+
     it("falls back to the next free cell when the targeted cell is occupied", () => {
       const occupied: PlacedDevice = {
         id: "child-1",
@@ -480,6 +568,35 @@ describe("Drag and Drop Utilities", () => {
         U_HEIGHT,
       );
       expect(target).toBeNull();
+    });
+
+    it("never offers another container as a child drop target", () => {
+      const target = detectContainerDropTarget(
+        rackWithCarrier(),
+        deviceLibrary,
+        carrier2x2,
+        170,
+        40,
+        RACK_WIDTH,
+        12,
+        U_HEIGHT,
+      );
+      const hover = detectContainerHover(
+        rackWithCarrier(),
+        deviceLibrary,
+        carrier2x2,
+        170,
+        40,
+        RACK_WIDTH,
+        12,
+        U_HEIGHT,
+      );
+
+      expect(target).toBeNull();
+      expect(hover).toMatchObject({
+        containerId: "carrier-1",
+        isValidTarget: false,
+      });
     });
 
     it("returns null when no container sits at the target U", () => {

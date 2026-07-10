@@ -68,6 +68,32 @@ test.describe("visual regression", () => {
     });
   });
 
+  test("canvas - populated RackMate starter", async ({ page }) => {
+    await gotoVisual(page, "/");
+    await page.getByTestId("btn-command-palette").click();
+    await page.getByTestId("command-palette-input").fill("rackmate");
+    await page
+      .getByTestId("command-palette-item-new-layout-template-rackmate-t1-plus")
+      .click();
+    await expect(
+      page.getByTestId("rack-canvas").getByRole("button", {
+        name: /UCG-Max, 0\.5U network, mounted in/,
+      }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("f");
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    });
+    await settle(page);
+    await expect(page).toHaveScreenshot(
+      "canvas-rackmate-starter-populated.png",
+      { mask: dynamicMasks(page) },
+    );
+  });
+
   test("canvas - populated rack, dark theme", async ({ page }) => {
     await gotoVisual(page, POPULATED_URL);
     await expect(page).toHaveScreenshot("canvas-populated-dark.png", {
@@ -137,6 +163,7 @@ test.describe("visual regression", () => {
     await runPaletteCommand(page, "share");
     const dialog = page.locator(locators.dialog.root);
     await expect(dialog).toBeVisible();
+    await expect(page.getByTestId("share-url-input")).not.toHaveValue("");
     await settle(page);
     // The share URL and its QR code encode the layout and app version, so both
     // change between builds: mask them.

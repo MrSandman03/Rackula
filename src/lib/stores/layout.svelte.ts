@@ -121,6 +121,8 @@ import {
   duplicateDevice as duplicateDeviceImpl,
   placeInContainer as placeInContainerImpl,
   placeDeviceSmart as placeDeviceSmartImpl,
+  moveDeviceIntoContainer as moveDeviceIntoContainerImpl,
+  moveDeviceWithSmartCarrier as moveDeviceWithSmartCarrierImpl,
   moveDeviceToRack as moveDeviceToRackImpl,
   moveDeviceToSlot as moveDeviceToSlotImpl,
 } from "./layout/device-actions";
@@ -331,6 +333,8 @@ export function createLayoutStore(
     placeDevice,
     placeInContainer,
     placeDeviceSmart,
+    moveDeviceIntoContainer,
+    moveDeviceWithSmartCarrier,
     moveDevice,
     moveDeviceToRack,
     moveDeviceToSlot,
@@ -444,6 +448,7 @@ export function createLayoutStore(
     form_factor?: FormFactor,
     desc_units?: boolean,
     starting_unit?: number,
+    profile?: Rack["profile"],
   ) {
     return addRackImpl(
       stateAccess,
@@ -453,6 +458,7 @@ export function createLayoutStore(
       form_factor,
       desc_units,
       starting_unit,
+      profile,
     );
   }
 
@@ -709,6 +715,46 @@ export function createLayoutStore(
     );
   }
 
+  /** Move an existing placement into a container while preserving its identity. */
+  function moveDeviceIntoContainer(
+    fromRackId: string,
+    sourceIndex: number,
+    targetRackId: string,
+    containerId: string,
+    slotId: string,
+    position: number,
+  ): boolean {
+    return moveDeviceIntoContainerImpl(
+      stateAccess,
+      fromRackId,
+      sourceIndex,
+      targetRackId,
+      containerId,
+      slotId,
+      position,
+      (device) => $state.snapshot(device),
+    );
+  }
+
+  /** Move an existing carried device via a synthesized rail carrier. */
+  function moveDeviceWithSmartCarrier(
+    fromRackId: string,
+    sourceIndex: number,
+    targetRackId: string,
+    position: number,
+    face?: DeviceFace,
+  ): boolean {
+    return moveDeviceWithSmartCarrierImpl(
+      stateAccess,
+      fromRackId,
+      sourceIndex,
+      targetRackId,
+      position,
+      face,
+      (device) => $state.snapshot(device),
+    );
+  }
+
   /**
    * Move a device within a rack
    * Uses undo/redo support via moveDeviceRecorded
@@ -719,7 +765,14 @@ export function createLayoutStore(
     newPosition: number,
     face?: DeviceFace,
   ): boolean {
-    return moveDeviceRecorded(rackId, deviceIndex, newPosition, face);
+    return moveDeviceRecordedImpl(
+      stateAccess,
+      rackId,
+      deviceIndex,
+      newPosition,
+      face,
+      (device) => $state.snapshot(device),
+    );
   }
 
   /**
@@ -769,7 +822,13 @@ export function createLayoutStore(
     deviceIndex: number,
     face: DeviceFace,
   ): void {
-    updateDeviceFaceRecorded(rackId, deviceIndex, face);
+    updateDeviceFaceRecordedImpl(
+      stateAccess,
+      rackId,
+      deviceIndex,
+      face,
+      (device) => $state.snapshot(device),
+    );
   }
 
   /**
@@ -1111,6 +1170,7 @@ export function createLayoutStore(
       deviceIndex,
       newPositionU,
       newFace,
+      (device) => $state.snapshot(device),
     );
   }
 
@@ -1126,7 +1186,13 @@ export function createLayoutStore(
     deviceIndex: number,
     face: DeviceFace,
   ): void {
-    updateDeviceFaceRecordedImpl(stateAccess, rackId, deviceIndex, face);
+    updateDeviceFaceRecordedImpl(
+      stateAccess,
+      rackId,
+      deviceIndex,
+      face,
+      (device) => $state.snapshot(device),
+    );
   }
 
   function updateDeviceNameRecorded(
@@ -1358,6 +1424,8 @@ const layoutStoreFacade: LayoutStore = {
   placeDevice: delegate("placeDevice"),
   placeInContainer: delegate("placeInContainer"),
   placeDeviceSmart: delegate("placeDeviceSmart"),
+  moveDeviceIntoContainer: delegate("moveDeviceIntoContainer"),
+  moveDeviceWithSmartCarrier: delegate("moveDeviceWithSmartCarrier"),
   moveDevice: delegate("moveDevice"),
   moveDeviceToRack: delegate("moveDeviceToRack"),
   moveDeviceToSlot: delegate("moveDeviceToSlot"),

@@ -5,8 +5,9 @@ name: Claude Code Review
 # `pull_request_target` would expose secrets but Anthropic's app-token exchange
 # rejects OIDC tokens with `event_name: pull_request_target`
 # (see https://github.com/anthropics/claude-code-action/issues/713). Until that
-# is fixed upstream, fork PRs go unreviewed by this workflow — use the
-# `@claude` comment trigger in claude.yml for on-demand review of fork PRs.
+# is fixed upstream, fork PRs are skipped. This workflow is optional,
+# non-gating signal for eligible same-repository PRs. Fork PRs use the
+# repository's exact-head independent review policy instead.
 
 on:
   pull_request:

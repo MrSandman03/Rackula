@@ -25,27 +25,152 @@ import {
   CATEGORY_TO_ABBREV,
   ABBREV_TO_CATEGORY,
   SHARE_FORMAT_VERSION,
+  projectMinimalRackulaFit,
   type MinimalLayout,
   type MinimalLayoutV2,
   type MinimalDeviceType,
   type MinimalDevice,
   type MinimalRackV2,
   type MinimalRackGroup,
+  type MinimalRackulaFit,
 } from "$lib/schemas/share";
+import { LayoutSchema, LegacyShareLayoutSchema } from "$lib/schemas";
+import { clampOverRackPositions } from "$lib/schemas/migrations";
+import { VERSION } from "$lib/version";
 import { generateId } from "./device";
 import { createDefaultRack } from "./serialization";
 import { toHumanUnits, toInternalUnits } from "./position";
+import { hydrateBuiltInDeviceType } from "./built-in-device";
+import { adaptLegacyLayout } from "$lib/storage";
+import {
+  RACKMATE_T1_PLUS_NAME,
+  RACKMATE_T1_PLUS_PROFILE,
+  RACKMATE_T1_PLUS_WIDTH,
+} from "./rack-profile";
+import { RACKMATE_T1_PLUS_HEIGHT } from "$lib/types/constants";
 
 // =============================================================================
 // Helper Functions
 // =============================================================================
 
 /**
- * Normalize rack width to valid share format values (10 or 19)
- * Maps non-standard widths (21, 23) to 19
+ * Preserve every supported rack width in the share format. The fallback keeps
+ * malformed in-memory data from escaping the encoder, although decoded links
+ * are already constrained by the share schema.
  */
-function normalizeRackWidth(width: number): 10 | 19 {
-  return width === 10 ? 10 : 19;
+function normalizeRackWidth(width: number): 10 | 19 | 21 | 23 {
+  return width === 10 || width === 19 || width === 21 || width === 23
+    ? width
+    : 19;
+}
+
+/** Only JSON-style records are safe to project into the compact share shape. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
+}
+
+function stringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const strings = value.filter(
+    (item): item is string => typeof item === "string",
+  );
+  return strings.length > 0 ? strings : undefined;
+}
+
+function shareDimensions(
+  value: unknown,
+): MinimalRackulaFit["dimensions_mm"] | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  const dimensions = Object.fromEntries(
+    ["width", "depth", "height", "length"]
+      .map((key) => [key, finiteNumber(value[key])] as const)
+      .filter((entry): entry is readonly [string, number] =>
+        Number.isFinite(entry[1]),
+      ),
+  );
+  return Object.keys(dimensions).length > 0 ? dimensions : undefined;
+}
+
+/** Keep only public fit fields needed to render and validate shared hardware. */
+function shareSafeRackulaFit(
+  deviceType: DeviceType,
+): MinimalRackulaFit | undefined {
+  const fit = deviceType.custom_fields?.rackula_fit;
+  if (!isPlainRecord(fit)) return undefined;
+
+  const result: MinimalRackulaFit = {};
+  for (const key of ["status", "mount_type"] as const) {
+    if (typeof fit[key] === "string") result[key] = fit[key];
+  }
+  for (const key of [
+    "recommended_tray_u",
+    "rackmate_t1_plus_depth_mm",
+    "rackmate_t1_plus_depth_clearance_mm",
+    "rack_internal_depth_mm",
+    "max_planned_child_u",
+  ] as const) {
+    const value = finiteNumber(fit[key]);
+    if (value !== undefined) result[key] = value;
+  }
+  for (const key of ["dimensions_mm", "reported_dimensions_mm"] as const) {
+    const value = shareDimensions(fit[key]);
+    if (value) result[key] = value;
+  }
+  for (const key of [
+    "recommended_mount_slugs",
+    "recommended_tray_slugs",
+    "open_checks",
+  ] as const) {
+    const value = stringList(fit[key]);
+    if (value) result[key] = value;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+/**
+ * Pre-profile share links omitted both `pf` and `dp`. Recover RackMate identity
+ * only for the exact tuple emitted by those releases, so ordinary 10-inch
+ * racks and links with explicit physical data retain their original meaning.
+ */
+function resolveSharedRackProfile(
+  rack: Pick<MinimalRackV2, "n" | "h" | "w" | "pf" | "dp">,
+  allowLegacyInference: boolean,
+): MinimalRackV2["pf"] {
+  if (rack.pf !== undefined || rack.dp !== undefined) return rack.pf;
+  if (!allowLegacyInference) return undefined;
+
+  return rack.n === RACKMATE_T1_PLUS_NAME &&
+    rack.h === RACKMATE_T1_PLUS_HEIGHT &&
+    rack.w === RACKMATE_T1_PLUS_WIDTH
+    ? RACKMATE_T1_PLUS_PROFILE
+    : undefined;
+}
+
+interface ConvertedShareLayout {
+  layout: Layout;
+  legacyInferredRackMateRackIds: Set<string>;
+}
+
+function wasLegacyRackMateProfileInferred(
+  rack: Pick<MinimalRackV2, "pf" | "dp">,
+  profile: MinimalRackV2["pf"],
+): boolean {
+  return (
+    profile === RACKMATE_T1_PLUS_PROFILE &&
+    rack.pf === undefined &&
+    rack.dp === undefined
+  );
 }
 
 /**
@@ -90,27 +215,54 @@ function convertDevices(devices: PlacedDevice[]): MinimalDevice[] {
  * their slot grid / slot_width / subdevice_role so their children resolve to
  * real slots after a round trip.
  */
-function convertDeviceTypes(dt: MinimalDeviceType[]): DeviceType[] {
-  return dt.map((item) => ({
-    slug: item.s,
-    u_height: item.h,
-    ...(item.mf ? { manufacturer: item.mf } : {}),
-    ...(item.m ? { model: item.m } : {}),
-    colour: item.c,
-    category: ABBREV_TO_CATEGORY[item.x] ?? "other",
-    ...(item.sl
-      ? {
-          slots: item.sl.map((s) => ({
-            id: s.id,
-            position: { row: s.r, col: s.cl },
-            ...(s.wf !== undefined ? { width_fraction: s.wf } : {}),
-            ...(s.hu !== undefined ? { height_units: s.hu } : {}),
-          })),
-        }
-      : {}),
-    ...(item.sw !== undefined ? { slot_width: item.sw } : {}),
-    ...(item.sr ? { subdevice_role: item.sr } : {}),
-  }));
+function convertDeviceTypes(
+  dt: MinimalDeviceType[],
+  useAuthoritativeSnapshots: boolean,
+): DeviceType[] {
+  return dt.map((item) => {
+    if (useAuthoritativeSnapshots && !item.o) {
+      throw new Error(
+        `Current share is missing the authoritative snapshot for device type: ${item.s}`,
+      );
+    }
+
+    const sharedFit = projectMinimalRackulaFit(item.rf);
+    const projected: DeviceType = {
+      slug: item.s,
+      u_height: item.h,
+      ...(item.mf ? { manufacturer: item.mf } : {}),
+      ...(item.m ? { model: item.m } : {}),
+      colour: item.c,
+      category: ABBREV_TO_CATEGORY[item.x] ?? "other",
+      ...(item.sl
+        ? {
+            slots: item.sl.map((s) => ({
+              id: s.id,
+              position: { row: s.r, col: s.cl },
+              ...(s.wf !== undefined ? { width_fraction: s.wf } : {}),
+              ...(s.hu !== undefined ? { height_units: s.hu } : {}),
+              ...(s.a
+                ? {
+                    accepts: s.a.map(
+                      (category) => ABBREV_TO_CATEGORY[category] ?? "other",
+                    ),
+                  }
+                : {}),
+            })),
+          }
+        : {}),
+      ...(item.sw !== undefined ? { slot_width: item.sw } : {}),
+      ...(item.sr ? { subdevice_role: item.sr } : {}),
+      ...(item.rw ? { rack_widths: item.rw } : {}),
+      ...(item.fd !== undefined ? { is_full_depth: item.fd } : {}),
+      ...(item.fi ? { front_image: true } : {}),
+      ...(item.ri ? { rear_image: true } : {}),
+      ...(sharedFit ? { custom_fields: { rackula_fit: sharedFit } } : {}),
+    };
+    return useAuthoritativeSnapshots
+      ? projected
+      : hydrateBuiltInDeviceType(projected);
+  });
 }
 
 /**
@@ -200,33 +352,53 @@ export function toMinimalLayout(layout: Layout): MinimalLayoutV2 {
   // Filter and convert device types (only used ones, deduplicated by slug)
   const dt: MinimalDeviceType[] = layout.device_types
     .filter((deviceType) => usedSlugs.has(deviceType.slug))
-    .map((deviceType) => ({
-      s: deviceType.slug,
-      h: deviceType.u_height,
-      ...(deviceType.manufacturer ? { mf: deviceType.manufacturer } : {}),
-      ...(deviceType.model ? { m: deviceType.model } : {}),
-      c: deviceType.colour,
-      x: CATEGORY_TO_ABBREV[deviceType.category] ?? "o",
-      // Container types carry their slot grid so children round-trip to real
-      // slots (a child references slot_id, which must exist on the parent type).
-      ...(deviceType.slots && deviceType.slots.length > 0
-        ? {
-            sl: deviceType.slots.map((s) => ({
-              id: s.id,
-              r: s.position.row,
-              cl: s.position.col,
-              ...(s.width_fraction !== undefined
-                ? { wf: s.width_fraction }
-                : {}),
-              ...(s.height_units !== undefined ? { hu: s.height_units } : {}),
-            })),
-          }
-        : {}),
-      ...(deviceType.slot_width !== undefined
-        ? { sw: deviceType.slot_width }
-        : {}),
-      ...(deviceType.subdevice_role ? { sr: deviceType.subdevice_role } : {}),
-    }));
+    .map((deviceType) => {
+      const shareFit = shareSafeRackulaFit(deviceType);
+      return {
+        s: deviceType.slug,
+        h: deviceType.u_height,
+        ...(deviceType.manufacturer ? { mf: deviceType.manufacturer } : {}),
+        ...(deviceType.model ? { m: deviceType.model } : {}),
+        c: deviceType.colour,
+        x: CATEGORY_TO_ABBREV[deviceType.category] ?? "o",
+        // Container types carry their slot grid so children round-trip to real
+        // slots (a child references slot_id, which must exist on the parent type).
+        ...(deviceType.slots && deviceType.slots.length > 0
+          ? {
+              sl: deviceType.slots.map((s) => ({
+                id: s.id,
+                r: s.position.row,
+                cl: s.position.col,
+                ...(s.width_fraction !== undefined
+                  ? { wf: s.width_fraction }
+                  : {}),
+                ...(s.height_units !== undefined ? { hu: s.height_units } : {}),
+                ...(s.accepts && s.accepts.length > 0
+                  ? {
+                      a: s.accepts.map(
+                        (category) => CATEGORY_TO_ABBREV[category],
+                      ),
+                    }
+                  : {}),
+              })),
+            }
+          : {}),
+        ...(deviceType.slot_width !== undefined
+          ? { sw: deviceType.slot_width }
+          : {}),
+        ...(deviceType.subdevice_role ? { sr: deviceType.subdevice_role } : {}),
+        ...(deviceType.rack_widths ? { rw: deviceType.rack_widths } : {}),
+        ...(deviceType.is_full_depth !== undefined
+          ? { fd: deviceType.is_full_depth }
+          : {}),
+        ...(deviceType.front_image ? { fi: 1 as const } : {}),
+        ...(deviceType.rear_image ? { ri: 1 as const } : {}),
+        ...(shareFit ? { rf: shareFit } : {}),
+        // V3 is self-contained: compact fields are authoritative, so a later
+        // built-in registry change cannot alter or invalidate this link.
+        o: 1 as const,
+      };
+    });
 
   // Convert all racks to MinimalRackV2
   const rs: MinimalRackV2[] = layout.racks.map((rack) => ({
@@ -234,6 +406,10 @@ export function toMinimalLayout(layout: Layout): MinimalLayoutV2 {
     n: rack.name,
     h: rack.height,
     w: normalizeRackWidth(rack.width),
+    ...(rack.profile ? { pf: rack.profile } : {}),
+    ...(rack.profile !== RACKMATE_T1_PLUS_PROFILE && rack.depth_mm !== undefined
+      ? { dp: rack.depth_mm }
+      : {}),
     d: convertDevices(rack.devices),
   }));
 
@@ -270,9 +446,10 @@ export function toMinimalLayout(layout: Layout): MinimalLayoutV2 {
 /**
  * Convert v1 MinimalLayout (single rack) back to full Layout
  */
-function fromMinimalLayoutV1(minimal: MinimalLayout): Layout {
-  const device_types = convertDeviceTypes(minimal.dt);
+function fromMinimalLayoutV1(minimal: MinimalLayout): ConvertedShareLayout {
+  const device_types = convertDeviceTypes(minimal.dt, false);
   const devices = convertMinimalDevices(minimal.r.d);
+  const profile = resolveSharedRackProfile(minimal.r, true);
 
   const rack = createDefaultRack(
     minimal.r.n,
@@ -283,33 +460,62 @@ function fromMinimalLayoutV1(minimal: MinimalLayout): Layout {
     1,
     true,
     generateId(),
+    profile,
   );
+  if (profile !== RACKMATE_T1_PLUS_PROFILE && minimal.r.dp !== undefined) {
+    rack.depth_mm = minimal.r.dp;
+  }
   rack.devices = devices;
 
   return {
-    version: minimal.v,
-    name: minimal.n,
-    racks: [rack],
-    device_types,
-    settings: {
-      display_mode: "label",
-      show_labels_on_images: false,
+    layout: {
+      version: minimal.v,
+      name: minimal.n,
+      racks: [rack],
+      device_types,
+      settings: {
+        display_mode: "label",
+        show_labels_on_images: false,
+      },
     },
+    legacyInferredRackMateRackIds: new Set(
+      wasLegacyRackMateProfileInferred(minimal.r, profile) ? [rack.id] : [],
+    ),
   };
 }
 
 /**
  * Convert v2 MinimalLayoutV2 (multi-rack) back to full Layout
  */
-function fromMinimalLayoutV2(minimal: MinimalLayoutV2): Layout {
-  const device_types = convertDeviceTypes(minimal.dt);
+function fromMinimalLayoutV2(minimal: MinimalLayoutV2): ConvertedShareLayout {
+  const isLegacyFormat = (minimal.fv ?? 1) < SHARE_FORMAT_VERSION;
+  if (!isLegacyFormat) {
+    const definedSlugs = new Set(minimal.dt.map((deviceType) => deviceType.s));
+    const missingSlugs = new Set<string>();
+    for (const rack of minimal.rs) {
+      for (const device of rack.d) {
+        if (!definedSlugs.has(device.t)) missingSlugs.add(device.t);
+      }
+    }
+    if (missingSlugs.size > 0) {
+      throw new Error(
+        `Current share is missing device type definitions: ${[...missingSlugs].join(", ")}`,
+      );
+    }
+  }
+  const device_types = convertDeviceTypes(minimal.dt, !isLegacyFormat);
 
   // Build reverse map: shortId -> generated UUID
   const shortIdToUuid = new Map<string, string>();
+  const legacyInferredRackMateRackIds = new Set<string>();
 
   const racks = minimal.rs.map((minRack) => {
     const rackId = generateId();
     shortIdToUuid.set(minRack.i, rackId);
+    const profile = resolveSharedRackProfile(minRack, isLegacyFormat);
+    if (wasLegacyRackMateProfileInferred(minRack, profile)) {
+      legacyInferredRackMateRackIds.add(rackId);
+    }
 
     const rack = createDefaultRack(
       minRack.n,
@@ -320,7 +526,11 @@ function fromMinimalLayoutV2(minimal: MinimalLayoutV2): Layout {
       1,
       true,
       rackId,
+      profile,
     );
+    if (profile !== RACKMATE_T1_PLUS_PROFILE && minRack.dp !== undefined) {
+      rack.depth_mm = minRack.dp;
+    }
     rack.devices = convertMinimalDevices(minRack.d);
     return rack;
   });
@@ -349,15 +559,18 @@ function fromMinimalLayoutV2(minimal: MinimalLayoutV2): Layout {
       : undefined;
 
   return {
-    version: minimal.v,
-    name: minimal.n,
-    racks,
-    ...(rack_groups ? { rack_groups } : {}),
-    device_types,
-    settings: {
-      display_mode: "label",
-      show_labels_on_images: false,
+    layout: {
+      version: minimal.v,
+      name: minimal.n,
+      racks,
+      ...(rack_groups ? { rack_groups } : {}),
+      device_types,
+      settings: {
+        display_mode: "label",
+        show_labels_on_images: false,
+      },
     },
+    legacyInferredRackMateRackIds,
   };
 }
 
@@ -395,9 +608,27 @@ function base64UrlDecode(str: string): Uint8Array {
  */
 export function encodeLayout(layout: Layout): string | null {
   try {
-    const minimal = toMinimalLayout(layout);
-    const json = JSON.stringify(minimal);
-    return LZString.compressToEncodedURIComponent(json);
+    // Sharing is a current-format authoring path. Validate the source at the
+    // strict boundary before projecting it into the compact representation so
+    // the encoder cannot publish legacy-only structures its decoder rejects.
+    // Workspace identity metadata is intentionally partial and is never shared;
+    // exclude it so an unsaved/browser-backed layout remains shareable.
+    const { metadata: _metadata, ...shareableLayout } = layout;
+    const currentLayout = LayoutSchema.parse(shareableLayout) as Layout;
+    const minimal = toMinimalLayout(currentLayout);
+    // Apply the same untrusted-collection bounds before publishing the link so
+    // the app never generates a compact payload its own decoder will reject.
+    const bounded = MinimalLayoutV2Schema.parse(minimal);
+    const json = JSON.stringify(bounded);
+    if (new TextEncoder().encode(json).length > MAX_DECOMPRESSED_BYTES) {
+      throw new Error("Share link exceeds the decompressed size limit");
+    }
+
+    const encoded = LZString.compressToEncodedURIComponent(json);
+    if (encoded.length > MAX_ENCODED_LENGTH) {
+      throw new Error("Share link exceeds the encoded size limit");
+    }
+    return encoded;
   } catch (error) {
     console.warn("Share link encode failed:", error);
     return null;
@@ -407,6 +638,53 @@ export function encodeLayout(layout: Layout): string | null {
 export interface DecodeResult {
   layout: Layout | null;
   error?: string;
+}
+
+function validateDecodedLayout(
+  converted: ConvertedShareLayout,
+  legacyFormat: boolean,
+): DecodeResult {
+  // Conversion already moved human-U positions into current internal units.
+  // Legacy formats still need carrier adaptation and saved-data waivers. V3 is
+  // authoritative current data and must pass strict validation unchanged.
+  let candidate: Layout = { ...converted.layout, version: VERSION };
+  if (legacyFormat) {
+    candidate = adaptLegacyLayout(candidate);
+
+    if (converted.legacyInferredRackMateRackIds.size > 0) {
+      const uHeightBySlug = new Map(
+        candidate.device_types.map((deviceType) => [
+          deviceType.slug,
+          deviceType.u_height,
+        ]),
+      );
+      candidate = {
+        ...candidate,
+        racks: candidate.racks.map((rack) =>
+          converted.legacyInferredRackMateRackIds.has(rack.id)
+            ? {
+                ...rack,
+                devices: clampOverRackPositions(
+                  rack.devices,
+                  rack.height,
+                  uHeightBySlug,
+                ),
+              }
+            : rack,
+        ),
+      };
+    }
+  }
+
+  const result = legacyFormat
+    ? LegacyShareLayoutSchema.safeParse(candidate)
+    : LayoutSchema.safeParse(candidate);
+  if (!result.success) {
+    console.warn("Share link layout validation failed:", result.error);
+    return { layout: null, error: "Layout format is invalid or outdated" };
+  }
+
+  return { layout: result.data as Layout };
 }
 
 /**
@@ -488,7 +766,7 @@ export function decodeLayout(encoded: string): DecodeResult {
 
     if (json) {
       // Guard the lz-string output too: it is also attacker-controlled.
-      if (json.length > MAX_DECOMPRESSED_BYTES) {
+      if (new TextEncoder().encode(json).length > MAX_DECOMPRESSED_BYTES) {
         return { layout: null, error: "Share link is too large" };
       }
     } else {
@@ -506,7 +784,11 @@ export function decodeLayout(encoded: string): DecodeResult {
         console.warn("Share link v2 validation failed:", result.error);
         return { layout: null, error: "Layout format is invalid or outdated" };
       }
-      return { layout: fromMinimalLayoutV2(result.data) };
+      const legacyFormat = (result.data.fv ?? 1) < SHARE_FORMAT_VERSION;
+      return validateDecodedLayout(
+        fromMinimalLayoutV2(result.data),
+        legacyFormat,
+      );
     }
 
     // v1 fallback
@@ -515,7 +797,7 @@ export function decodeLayout(encoded: string): DecodeResult {
       console.warn("Share link v1 validation failed:", result.error);
       return { layout: null, error: "Layout format is invalid or outdated" };
     }
-    return { layout: fromMinimalLayoutV1(result.data) };
+    return validateDecodedLayout(fromMinimalLayoutV1(result.data), true);
   } catch (error) {
     console.warn("Share link decode failed:", error);
     return { layout: null, error: "Could not decode share link" };

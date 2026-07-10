@@ -68,6 +68,7 @@
     flipSelectedDeviceFace,
     duplicateSelection,
     canMoveSelectedDeviceSlot,
+    isSelectedDeviceContainerChild,
   } from "$lib/actions/selection-actions";
   import { handleDelete, handleNewRack } from "$lib/utils/dialog-actions";
   import {
@@ -120,6 +121,26 @@
   let deleteTarget = $derived(dialogStore.deleteTarget);
   let selectedDeviceForSheet = $derived(dialogStore.selectedDeviceIndex);
   let exportQrCodeDataUrl = $derived(dialogStore.exportQrCodeDataUrl);
+  const deleteDeviceChildCount = $derived.by(() => {
+    if (deleteTarget?.type !== "device") return 0;
+    const rackId = selectionStore.selectedRackId;
+    const deviceId = selectionStore.selectedDeviceId;
+    if (!rackId || !deviceId) return 0;
+    const rack = layoutStore.getRackById(rackId);
+    return (
+      rack?.devices.filter((device) => device.container_id === deviceId)
+        .length ?? 0
+    );
+  });
+  const confirmDeleteMessage = $derived.by(() => {
+    if (deleteTarget?.type === "rack") {
+      return `Are you sure you want to delete "${deleteTarget.name}"? All devices in this rack will be removed.`;
+    }
+    if (deleteTarget?.type === "device" && deleteDeviceChildCount > 0) {
+      return `Remove "${deleteTarget.name}" and ${deleteDeviceChildCount} mounted ${deleteDeviceChildCount === 1 ? "device" : "devices"} from this rack?`;
+    }
+    return `Are you sure you want to remove "${deleteTarget?.name}" from this rack?`;
+  });
 
   // Device library import file input ref
   let deviceImportInputRef = $state<HTMLInputElement | null>(null);
@@ -541,6 +562,7 @@
     hasRacks: layoutStore.rackCount > 0,
     mode: getStorageMode(),
     canMoveDeviceSlot: canMoveSelectedDeviceSlot(),
+    isContainerChildSelected: isSelectedDeviceContainerChild(),
     readOnly: uiStore.readOnly,
   });
 
@@ -818,10 +840,12 @@
 <ConfirmDialog
   open={confirmDeleteOpen}
   title={deleteTarget?.type === "rack" ? "Delete Rack" : "Remove Device"}
-  message={deleteTarget?.type === "rack"
-    ? `Are you sure you want to delete "${deleteTarget?.name}"? All devices in this rack will be removed.`
-    : `Are you sure you want to remove "${deleteTarget?.name}" from this rack?`}
-  confirmLabel={deleteTarget?.type === "rack" ? "Delete Rack" : "Remove"}
+  message={confirmDeleteMessage}
+  confirmLabel={deleteTarget?.type === "rack"
+    ? "Delete Rack"
+    : deleteDeviceChildCount > 0
+      ? `Remove ${deleteDeviceChildCount + 1} devices`
+      : "Remove"}
   onconfirm={handleConfirmDelete}
   oncancel={handleCancelDelete}
 />

@@ -168,6 +168,24 @@ describe("Layout Store - Undo/Redo Integration", () => {
       expect(store.rack?.devices[0]?.position).toBe(toInternalUnits(10));
     });
 
+    it("undoes a removal in its originating rack after the active rack changes", () => {
+      const dt = store.device_types[0]!;
+      const otherRack = store.addRack("Other Rack", 12)!;
+
+      store.placeDeviceRecorded(rack.id, dt.slug, 10);
+      store.removeDeviceRecorded(rack.id, 0);
+      store.setActiveRack(otherRack.id);
+
+      store.undo();
+
+      expect(store.getRackById(rack.id)?.devices[0]).toMatchObject({
+        device_type: dt.slug,
+        position: toInternalUnits(10),
+      });
+      expect(store.getRackById(otherRack.id)?.devices).toEqual([]);
+      expect(store.activeRackId).toBe(otherRack.id);
+    });
+
     it("updateDeviceFaceRecorded can be undone", () => {
       // Use a half-depth device so the face can move between front and rear.
       // Full-depth devices coerce any face value to "both" (guard in recorded-device-actions).

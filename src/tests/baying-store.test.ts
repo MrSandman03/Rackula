@@ -42,6 +42,50 @@ describe("createBayedRack", () => {
     expect(group.rack_ids).toEqual([source.id, newRack.id]);
   });
 
+  it("preserves RackMate profile and depth across every bay growth path", () => {
+    const store = getLayoutStore();
+    const source = store.addRack(
+      "RackMate",
+      8,
+      10,
+      "4-post-cabinet",
+      false,
+      1,
+      "rackmate-t1-plus",
+    )!;
+
+    const created = store.createBayedRack(source.id);
+    expect(created.error).toBeUndefined();
+    const groupId = created.groupId!;
+    expect(store.getRackById(created.rackId!)).toMatchObject({
+      profile: "rackmate-t1-plus",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+
+    const added = store.addBayToGroup(groupId);
+    expect(added.error).toBeUndefined();
+    expect(store.getRackById(added.rackId!)).toMatchObject({
+      profile: "rackmate-t1-plus",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+
+    const resized = store.setBayCount(groupId, 4);
+    expect(resized.error).toBeUndefined();
+    const group = store.getRackGroupById(groupId)!;
+    for (const id of group.rack_ids) {
+      expect(store.getRackById(id)).toMatchObject({
+        profile: "rackmate-t1-plus",
+        width: 10,
+        height: 8,
+        depth_mm: 260,
+      });
+    }
+  });
+
   it("extends an existing bay with a uniform member", () => {
     const store = getLayoutStore();
     const source = store.addRack("Rack A", 30, 19, "4-post-cabinet")!;
@@ -202,5 +246,27 @@ describe("resizeBayedGroupHeight", () => {
     const res = store.resizeBayedGroupHeight(group!.id, 30);
     expect(res.error).toBeDefined();
     expect(store.getRackById(a.id)!.height).toBe(42);
+  });
+
+  it("rejects resizing a bay that contains a fixed RackMate profile", () => {
+    const store = getLayoutStore();
+    const source = store.addRack(
+      "RackMate",
+      8,
+      10,
+      "4-post-cabinet",
+      false,
+      1,
+      "rackmate-t1-plus",
+    )!;
+    const created = store.createBayedRack(source.id);
+    const group = store.getRackGroupById(created.groupId!)!;
+
+    const result = store.resizeBayedGroupHeight(group.id, 12);
+
+    expect(result.error).toMatch(/fixed rack profile/i);
+    for (const id of group.rack_ids) {
+      expect(store.getRackById(id)!.height).toBe(8);
+    }
   });
 });

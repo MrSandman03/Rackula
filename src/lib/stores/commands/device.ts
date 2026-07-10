@@ -2,8 +2,9 @@
  * Device Commands for Undo/Redo
  */
 
-import type { Command } from "./types";
-import type { PlacedDevice, DeviceFace } from "$lib/types";
+import type { Command, CommandType } from "./types";
+import type { Cable, PlacedDevice, DeviceFace } from "$lib/types";
+import type { RackCommandStore } from "./rack";
 import { getImageStore } from "../images.svelte";
 import { placementKey } from "$lib/utils/placement-key";
 
@@ -216,6 +217,345 @@ export function createRemoveDeviceCommand(
   };
 }
 
+/** Store surface needed to replace an occupied carrier and its direct children. */
+export type DeviceAssemblyCommandStore = Pick<
+  RackCommandStore,
+  "restoreRackDevicesRaw"
+> & {
+  getCables(): readonly Cable[];
+  insertCableRaw(cable: Cable, index: number): void;
+  removeCableRaw(id: string): void;
+};
+
+export type RackDevicesTransitionStore = Pick<
+  RackCommandStore,
+  "restoreRackDevicesRaw"
+> &
+  Pick<CrossRackMoveStore, "setActiveRackId" | "getActiveRackId">;
+
+export interface RackDevicesTransitionOptions {
+  removedImageDevices?: PlacedDevice[];
+  layoutId?: string;
+}
+
+function snapshotRemovedImages(devices: PlacedDevice[], layoutId: string) {
+  return devices.map((device) => {
+    const images = getImageStore()
+      .getAllImages()
+      .get(placementKey(layoutId, device.id));
+    return {
+      deviceId: device.id,
+      images: images ? structuredClone(images) : undefined,
+    };
+  });
+}
+
+function removePlacementImages(
+  snapshots: ReturnType<typeof snapshotRemovedImages>,
+  layoutId: string,
+): void {
+  const imageStore = getImageStore();
+  for (const snapshot of snapshots) {
+    imageStore.removeAllDeviceImages(placementKey(layoutId, snapshot.deviceId));
+  }
+}
+
+function restorePlacementImages(
+  snapshots: ReturnType<typeof snapshotRemovedImages>,
+  layoutId: string,
+): void {
+  const imageStore = getImageStore();
+  for (const snapshot of snapshots) {
+    if (snapshot.images?.front) {
+      imageStore.setDeviceImage(
+        placementKey(layoutId, snapshot.deviceId),
+        "front",
+        snapshot.images.front,
+      );
+    }
+    if (snapshot.images?.rear) {
+      imageStore.setDeviceImage(
+        placementKey(layoutId, snapshot.deviceId),
+        "rear",
+        snapshot.images.rear,
+      );
+    }
+  }
+}
+
+/** Replace one rack's complete device roster as a single exact undo entry. */
+export function createRackDevicesTransitionCommand(
+  rackId: string,
+  beforeDevices: PlacedDevice[],
+  afterDevices: PlacedDevice[],
+  store: RackDevicesTransitionStore,
+  description: string,
+  type: CommandType = "MOVE_DEVICE",
+  options: RackDevicesTransitionOptions = {},
+): Command {
+  const beforeCopy = structuredClone(beforeDevices);
+  const afterCopy = structuredClone(afterDevices);
+  const layoutId = options.layoutId ?? "";
+  const removedImageSnapshots = snapshotRemovedImages(
+    options.removedImageDevices ?? [],
+    layoutId,
+  );
+
+  function restore(devices: PlacedDevice[]): void {
+    const savedActiveRack = store.getActiveRackId();
+    store.setActiveRackId(rackId);
+    try {
+      store.restoreRackDevicesRaw(structuredClone(devices));
+    } finally {
+      store.setActiveRackId(savedActiveRack);
+    }
+  }
+
+  return {
+    type,
+    description,
+    timestamp: Date.now(),
+    execute() {
+      restore(afterCopy);
+      removePlacementImages(removedImageSnapshots, layoutId);
+    },
+    undo() {
+      restore(beforeCopy);
+      restorePlacementImages(removedImageSnapshots, layoutId);
+    },
+  };
+}
+
+/** Replace two racks' rosters atomically, preserving IDs, order, and metadata. */
+export function createCrossRackDevicesTransitionCommand(
+  sourceRackId: string,
+  sourceBeforeDevices: PlacedDevice[],
+  sourceAfterDevices: PlacedDevice[],
+  targetRackId: string,
+  targetBeforeDevices: PlacedDevice[],
+  targetAfterDevices: PlacedDevice[],
+  store: RackDevicesTransitionStore,
+  description: string,
+  options: RackDevicesTransitionOptions = {},
+): Command {
+  const sourceBefore = structuredClone(sourceBeforeDevices);
+  const sourceAfter = structuredClone(sourceAfterDevices);
+  const targetBefore = structuredClone(targetBeforeDevices);
+  const targetAfter = structuredClone(targetAfterDevices);
+  const layoutId = options.layoutId ?? "";
+  const removedImageSnapshots = snapshotRemovedImages(
+    options.removedImageDevices ?? [],
+    layoutId,
+  );
+
+  function restore(
+    sourceDevices: PlacedDevice[],
+    targetDevices: PlacedDevice[],
+  ): void {
+    const savedActiveRack = store.getActiveRackId();
+    try {
+      store.setActiveRackId(sourceRackId);
+      store.restoreRackDevicesRaw(structuredClone(sourceDevices));
+      store.setActiveRackId(targetRackId);
+      store.restoreRackDevicesRaw(structuredClone(targetDevices));
+    } finally {
+      store.setActiveRackId(savedActiveRack);
+    }
+  }
+
+  return {
+    type: "CROSS_RACK_MOVE",
+    description,
+    timestamp: Date.now(),
+    execute() {
+      restore(sourceAfter, targetAfter);
+      removePlacementImages(removedImageSnapshots, layoutId);
+    },
+    undo() {
+      restore(sourceBefore, targetBefore);
+      restorePlacementImages(removedImageSnapshots, layoutId);
+    },
+  };
+}
+
+/** Duplicate a complete assembly and its placement images in one undo entry. */
+export function createDuplicateDeviceAssemblyCommand(
+  rackId: string,
+  beforeDevices: PlacedDevice[],
+  afterDevices: PlacedDevice[],
+  imageCopies: Array<{ sourceId: string; targetId: string }>,
+  store: RackDevicesTransitionStore,
+  deviceName: string,
+  layoutId: string = "",
+): Command {
+  const rosterCommand = createRackDevicesTransitionCommand(
+    rackId,
+    beforeDevices,
+    afterDevices,
+    store,
+    `Duplicate ${deviceName}`,
+    "PLACE_DEVICE",
+  );
+  const snapshots = imageCopies.map(({ sourceId, targetId }) => {
+    const source = getImageStore()
+      .getAllImages()
+      .get(placementKey(layoutId, sourceId));
+    return {
+      targetId,
+      images: source ? structuredClone(source) : undefined,
+    };
+  });
+
+  function restoreImages(): void {
+    const imageStore = getImageStore();
+    for (const snapshot of snapshots) {
+      if (snapshot.images?.front) {
+        imageStore.setDeviceImage(
+          placementKey(layoutId, snapshot.targetId),
+          "front",
+          snapshot.images.front,
+        );
+      }
+      if (snapshot.images?.rear) {
+        imageStore.setDeviceImage(
+          placementKey(layoutId, snapshot.targetId),
+          "rear",
+          snapshot.images.rear,
+        );
+      }
+    }
+  }
+
+  return {
+    ...rosterCommand,
+    execute() {
+      rosterCommand.execute();
+      restoreImages();
+    },
+    undo() {
+      const imageStore = getImageStore();
+      for (const snapshot of snapshots) {
+        imageStore.removeAllDeviceImages(
+          placementKey(layoutId, snapshot.targetId),
+        );
+      }
+      rosterCommand.undo();
+    },
+  };
+}
+
+/** Remove an occupied carrier as one exact, undoable roster transition. */
+export function createRemoveDeviceAssemblyCommand(
+  beforeDevices: PlacedDevice[],
+  afterDevices: PlacedDevice[],
+  removedDevices: PlacedDevice[],
+  store: DeviceAssemblyCommandStore,
+  deviceName: string = "device",
+  layoutId: string = "",
+  beforeCables: Cable[] = [],
+): Command {
+  const beforeCopy = structuredClone(beforeDevices);
+  const afterCopy = structuredClone(afterDevices);
+  const removedCopies = structuredClone(removedDevices);
+  const beforeCableCopy = structuredClone(beforeCables);
+  const removedDeviceIds = new Set(removedCopies.map((device) => device.id));
+  type IndexedCable = { cable: Cable; index: number };
+
+  function isAffectedCable(cable: Cable): boolean {
+    return (
+      removedDeviceIds.has(cable.a_device_id) ||
+      removedDeviceIds.has(cable.b_device_id)
+    );
+  }
+
+  function snapshotAffectedCables(cables: readonly Cable[]): IndexedCable[] {
+    return cables.flatMap((cable, index) =>
+      isAffectedCable(cable) ? [{ cable: { ...cable }, index }] : [],
+    );
+  }
+
+  let affectedCableSnapshots = snapshotAffectedCables(beforeCableCopy);
+  let cableOrder = new Map(
+    beforeCableCopy.map((cable, index) => [cable.id, index]),
+  );
+  const imageSnapshots = removedCopies.map((device) => {
+    const snapshot = getImageStore()
+      .getAllImages()
+      .get(placementKey(layoutId, device.id));
+    return {
+      deviceId: device.id,
+      images: snapshot ? structuredClone(snapshot) : undefined,
+    };
+  });
+
+  function removeAffectedCables(): void {
+    const currentCables = store.getCables();
+    affectedCableSnapshots = snapshotAffectedCables(currentCables);
+    cableOrder = new Map(
+      currentCables.map((cable, index) => [cable.id, index]),
+    );
+    for (const { cable } of affectedCableSnapshots) {
+      store.removeCableRaw(cable.id);
+    }
+  }
+
+  function restoreAffectedCables(): void {
+    for (const { cable } of affectedCableSnapshots) {
+      store.removeCableRaw(cable.id);
+    }
+    for (const { cable, index } of affectedCableSnapshots) {
+      const currentCables = store.getCables();
+      const nextOriginalCable = currentCables.findIndex((candidate) => {
+        const originalIndex = cableOrder.get(candidate.id);
+        return originalIndex !== undefined && originalIndex > index;
+      });
+      const previousOriginalCable = currentCables.findLastIndex((candidate) => {
+        const originalIndex = cableOrder.get(candidate.id);
+        return originalIndex !== undefined && originalIndex < index;
+      });
+      store.insertCableRaw(
+        structuredClone(cable),
+        nextOriginalCable >= 0 ? nextOriginalCable : previousOriginalCable + 1,
+      );
+    }
+  }
+
+  return {
+    type: "REMOVE_DEVICE",
+    description: `Remove ${deviceName}`,
+    timestamp: Date.now(),
+    execute() {
+      removeAffectedCables();
+      store.restoreRackDevicesRaw(structuredClone(afterCopy));
+      const imageStore = getImageStore();
+      for (const device of removedCopies) {
+        imageStore.removeAllDeviceImages(placementKey(layoutId, device.id));
+      }
+    },
+    undo() {
+      store.restoreRackDevicesRaw(structuredClone(beforeCopy));
+      restoreAffectedCables();
+      const imageStore = getImageStore();
+      for (const snapshot of imageSnapshots) {
+        if (snapshot.images?.front) {
+          imageStore.setDeviceImage(
+            placementKey(layoutId, snapshot.deviceId),
+            "front",
+            snapshot.images.front,
+          );
+        }
+        if (snapshot.images?.rear) {
+          imageStore.setDeviceImage(
+            placementKey(layoutId, snapshot.deviceId),
+            "rear",
+            snapshot.images.rear,
+          );
+        }
+      }
+    },
+  };
+}
+
 /**
  * Create a command to update a device's display face
  */
@@ -372,14 +712,16 @@ export function createDetachContainerCommand(
 
 /**
  * Create a command to move a contained child to a different cell of the same
- * carrier. Only slot_id changes; container_id is preserved, so the child stays
- * inside its carrier and is never ejected (contained-device guard, #2146).
+ * carrier. The child position is normalized to the bottom of the new cell while
+ * container_id is preserved, so the child stays inside its carrier and is never
+ * ejected (contained-device guard, #2146).
  */
 export function createMoveToSlotCommand(
   index: number,
   containerId: string,
   oldSlotId: string | undefined,
   newSlotId: string,
+  oldPosition: number,
   store: DeviceCommandStore,
   deviceName: string = "device",
 ): Command {
@@ -392,6 +734,7 @@ export function createMoveToSlotCommand(
     execute() {
       const targetIndex = resolveTargetIndex();
       if (targetIndex === undefined) return;
+      store.moveDeviceRaw(targetIndex, 0);
       store.updateDeviceContainerLinkageRaw(
         targetIndex,
         containerId,
@@ -406,6 +749,7 @@ export function createMoveToSlotCommand(
         containerId,
         oldSlotId,
       );
+      store.moveDeviceRaw(targetIndex, oldPosition);
     },
   };
 }

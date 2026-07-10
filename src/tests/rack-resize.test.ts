@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
+  canFitRackDimensions,
   canResizeRackTo,
   getDeviceRangeText,
   formatConflictMessage,
@@ -12,6 +13,7 @@ import {
   createTestRack,
   createTestDevice,
   createTestDeviceType,
+  createTestContainerType,
 } from "./factories";
 
 describe("rack-resize", () => {
@@ -69,6 +71,114 @@ describe("rack-resize", () => {
       const result = canResizeRackTo(rack, 10, [dt]);
       expect(result.allowed).toBe(false);
       expect(result.conflicts).toContain(device);
+    });
+  });
+
+  describe("canFitRackDimensions", () => {
+    it("rejects a child device that is incompatible with the proposed rack width", () => {
+      const carrier = createTestContainerType({
+        slug: "carrier",
+        rack_widths: [10, 19],
+      });
+      const child = createTestDeviceType({
+        slug: "wide-child",
+        rack_widths: [19],
+      });
+      const parent = createTestDevice({
+        id: "carrier-1",
+        device_type: carrier.slug,
+        position: 1,
+      });
+      const placedChild = createTestDevice({
+        device_type: child.slug,
+        position: 0,
+        container_id: parent.id,
+        slot_id: "slot-1",
+      });
+      const rack = createTestRack({ devices: [parent, placedChild] });
+
+      expect(
+        canFitRackDimensions(rack, { width: 10, height: 8, depth_mm: 260 }, [
+          carrier,
+          child,
+        ]),
+      ).toEqual({ allowed: false, conflicts: [placedChild] });
+    });
+
+    it("rechecks a child against its narrower physical slot", () => {
+      const carrier = createTestContainerType({
+        slug: "carrier",
+        rack_widths: [10, 19],
+      });
+      const child = {
+        ...createTestDeviceType({
+          slug: "wide-child",
+          rack_widths: [10, 19],
+          slot_width: 1,
+        }),
+        custom_fields: {
+          rackula_fit: {
+            dimensions_mm: { width: 150, depth: 100, height: 40 },
+          },
+        },
+      };
+      const parent = createTestDevice({
+        id: "carrier-1",
+        device_type: carrier.slug,
+        position: 1,
+      });
+      const placedChild = createTestDevice({
+        device_type: child.slug,
+        position: 0,
+        container_id: parent.id,
+        slot_id: "slot-left",
+      });
+      const rack = createTestRack({ devices: [parent, placedChild] });
+
+      expect(
+        canFitRackDimensions(rack, { width: 10, height: 8, depth_mm: 260 }, [
+          carrier,
+          child,
+        ]),
+      ).toEqual({ allowed: false, conflicts: [placedChild] });
+    });
+
+    it("allows a compatible populated carrier to move to RackMate dimensions", () => {
+      const carrier = createTestContainerType({
+        slug: "carrier",
+        rack_widths: [10, 19],
+      });
+      const child = {
+        ...createTestDeviceType({
+          slug: "compact-child",
+          rack_widths: [10, 19],
+          slot_width: 1,
+        }),
+        custom_fields: {
+          rackula_fit: {
+            dimensions_mm: { width: 100, depth: 200, height: 40 },
+          },
+        },
+      };
+      const parent = createTestDevice({
+        id: "carrier-1",
+        device_type: carrier.slug,
+        position: 1,
+      });
+      const placedChild = createTestDevice({
+        device_type: child.slug,
+        position: 0,
+        container_id: parent.id,
+        slot_id: "slot-left",
+      });
+      const rack = createTestRack({ devices: [parent, placedChild] });
+
+      expect(
+        canFitRackDimensions(rack, { width: 10, height: 8, depth_mm: 260 }, [
+          carrier,
+          child,
+        ]),
+      ).toEqual({ allowed: true, conflicts: [] });
     });
   });
 

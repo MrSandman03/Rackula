@@ -3,15 +3,42 @@
  * Handles drag data, position calculation, and drop validation
  */
 
-import type { DeviceType, DeviceFace, Rack, Slot } from "$lib/types";
-import {
-  canPlaceDevice,
-  canPlaceInSlot,
-  findNextFreeChildPosition,
-} from "./collision";
+import type { DeviceType, DeviceFace, Rack } from "$lib/types";
+import { canPlaceInContainer, canPlaceDevice } from "./collision";
 import { RAIL_WIDTH } from "$lib/constants/layout";
 import { toInternalUnits, toHumanUnits } from "./position";
 import { effectiveFace } from "./effective-face";
+import { buildSlotGeometry } from "./slot-geometry";
+
+function slotAtPoint(
+  slots: NonNullable<DeviceType["slots"]>,
+  x: number,
+  y: number,
+  containerWidth: number,
+  containerHeight: number,
+  containerHeightUnits: number,
+) {
+  const hitX =
+    x >= 0 && x <= containerWidth ? Math.min(x, containerWidth - 1e-9) : x;
+  const hitY =
+    y >= 0 && y <= containerHeight ? Math.min(y, containerHeight - 1e-9) : y;
+  const geometry = buildSlotGeometry(
+    slots,
+    containerWidth,
+    containerHeight,
+    containerHeightUnits,
+  );
+  return slots.find((slot) => {
+    const bounds = geometry.get(slot.id);
+    if (!bounds) return false;
+    return (
+      hitX >= bounds.x &&
+      hitX < bounds.x + bounds.width &&
+      hitY >= bounds.y &&
+      hitY < bounds.y + bounds.height
+    );
+  });
+}
 
 /**
  * Shared drag state - workaround for browser security restriction
@@ -225,73 +252,6 @@ export function hideNativeDragGhost(dataTransfer: DataTransfer): void {
 }
 
 /**
- * Find the column index at a given X position within a container's slots.
- * Columns are derived from the distinct col values in the slot grid.
- * @param slots - Array of slots in the container
- * @param xOffsetInRack - X position relative to rack interior (0 = left edge)
- * @param interiorWidth - Width of rack interior in pixels
- * @returns The matched column index, or null if outside the grid
- */
-function colAtX(
-  slots: Slot[],
-  xOffsetInRack: number,
-  interiorWidth: number,
-): number | null {
-  // Columns share their width_fraction within a row; use the bottom row (the
-  // first occurrence of each col) to walk the column boundaries left to right.
-  const cols = [...new Set(slots.map((s) => s.position.col))].sort(
-    (a, b) => a - b,
-  );
-  let accumulated = 0;
-  for (const col of cols) {
-    const colSlot = slots.find((s) => s.position.col === col)!;
-    const width = interiorWidth * (colSlot.width_fraction ?? 1.0);
-    if (xOffsetInRack >= accumulated && xOffsetInRack < accumulated + width) {
-      return col;
-    }
-    accumulated += width;
-  }
-  return null;
-}
-
-/**
- * Find the row index at a given Y position within a container's U band.
- * Rows are 0-indexed from the bottom of the container. A 2-row carrier splits
- * its single U into a lower half (row 0) and an upper half (row 1).
- * @param slots - Array of slots in the container
- * @param mouseY - Mouse Y relative to rack SVG (0 = top)
- * @param rackHeight - Rack height in U
- * @param uHeight - Height of one U in pixels
- * @param containerBottomU - Container's bottom U position (human U)
- * @param containerHeightU - Container height in U
- * @returns The matched row index (clamped to the grid)
- */
-function rowAtY(
-  slots: Slot[],
-  mouseY: number,
-  rackHeight: number,
-  uHeight: number,
-  containerBottomU: number,
-  containerHeightU: number,
-): number {
-  const rowCount = new Set(slots.map((s) => s.position.row)).size;
-  if (rowCount <= 1) return 0;
-
-  // SVG y grows downward; U1 is at the bottom. A device whose bottom is at U n
-  // occupies y in [(rackHeight - n) * uHeight, ...). The container's visual top
-  // edge is the top of its highest U (containerBottomU + containerHeightU - 1).
-  const containerTopY =
-    (rackHeight - (containerBottomU + containerHeightU - 1)) * uHeight;
-  const containerPxHeight = containerHeightU * uHeight;
-  // Fraction from the top of the container (0 = top, 1 = bottom).
-  const fromTop = (mouseY - containerTopY) / containerPxHeight;
-  const clamped = Math.max(0, Math.min(fromTop, 0.999));
-  // Row 0 is the bottom; invert so the bottom slice maps to row 0.
-  const rowFromTop = Math.floor(clamped * rowCount);
-  return rowCount - 1 - rowFromTop;
-}
-
-/**
  * Container drop target information
  * Returned when a drop position is detected within a container slot
  */
@@ -332,7 +292,10 @@ export function detectContainerDropTarget(
   rackHeight: number,
   uHeight: number,
   faceFilter?: DeviceFace,
+  excludeDeviceId?: string,
 ): ContainerDropTarget | null {
+  if (draggedDevice.slots?.length) return null;
+
   const targetU = calculateDropPosition(mouseY, rackHeight, uHeight, 0);
 
   for (const container of rack.devices) {
@@ -356,59 +319,53 @@ export function detectContainerDropTarget(
     if (targetU < containerBottomU || targetU > containerTopU) continue;
 
     const interiorWidth = rackWidth - RAIL_WIDTH * 2;
-    const col = colAtX(slots, xOffsetInRack, interiorWidth);
-    const row = rowAtY(
+    const containerPxHeight = containerType.u_height * uHeight;
+    const containerTopY = (rackHeight - containerTopU) * uHeight;
+    const localY = mouseY - containerTopY;
+
+    // The cell under the pointer is the cell that will receive the drop. Use the
+    // complete validator so hover, preview, and commit agree on every constraint.
+    const aimed = slotAtPoint(
       slots,
-      mouseY,
-      rackHeight,
-      uHeight,
-      containerBottomU,
+      xOffsetInRack,
+      localY,
+      interiorWidth,
+      containerPxHeight,
       containerType.u_height,
     );
-
-    const children = rack.devices.filter(
-      (d) => d.container_id === container.id,
-    );
-    const occupied = new Set(
-      children.map((c) => c.slot_id).filter((id): id is string => !!id),
-    );
-
-    // Prefer the cell directly under the cursor when it is free and fits.
-    const aimed =
-      col !== null
-        ? slots.find((s) => s.position.col === col && s.position.row === row)
-        : undefined;
     if (
       aimed &&
-      !occupied.has(aimed.id) &&
-      canPlaceInSlot(draggedDevice, aimed, {
-        rackWidth: rack.width,
-        containerHeightUnits: containerType.u_height,
-      })
+      canPlaceInContainer(
+        rack,
+        deviceLibrary,
+        container,
+        containerType,
+        draggedDevice,
+        aimed.id,
+        0,
+        excludeDeviceId,
+      )
     ) {
       return { containerId: container.id, slotId: aimed.id, position: 0 };
     }
 
-    // Otherwise fall back to the first free cell (also covers an occupied aim).
-    const fittingSlots = slots.filter((slot) =>
-      canPlaceInSlot(draggedDevice, slot, {
-        rackWidth: rack.width,
-        containerHeightUnits: containerType.u_height,
-      }),
-    );
-    const free = findNextFreeChildPosition(
-      { ...containerType, slots: fittingSlots },
-      children,
-    );
-    if (free) {
-      return {
-        containerId: container.id,
-        slotId: free.slotId,
-        position: free.position,
-      };
+    for (const slot of slots) {
+      if (slot.id === aimed?.id) continue;
+      if (
+        canPlaceInContainer(
+          rack,
+          deviceLibrary,
+          container,
+          containerType,
+          draggedDevice,
+          slot.id,
+          0,
+          excludeDeviceId,
+        )
+      ) {
+        return { containerId: container.id, slotId: slot.id, position: 0 };
+      }
     }
-
-    // Container is under the cursor but full: do not fall through to the rail.
     return null;
   }
 
@@ -468,6 +425,7 @@ export function detectContainerHover(
   rackHeight: number,
   uHeight: number,
   faceFilter?: DeviceFace,
+  excludeDeviceId?: string,
 ): ContainerHoverInfo | null {
   const targetU = calculateDropPosition(mouseY, rackHeight, uHeight, 0);
 
@@ -493,29 +451,36 @@ export function detectContainerHover(
 
     // Found a container at this position - resolve the cell under the cursor.
     const interiorWidth = rackWidth - RAIL_WIDTH * 2;
-    const col = colAtX(slots, xOffsetInRack, interiorWidth);
-    const row = rowAtY(
+    const containerPxHeight = deviceType.u_height * uHeight;
+    const containerTopY = (rackHeight - containerTopU) * uHeight;
+    const slot = slotAtPoint(
       slots,
-      mouseY,
-      rackHeight,
-      uHeight,
-      containerBottomU,
+      xOffsetInRack,
+      mouseY - containerTopY,
+      interiorWidth,
+      containerPxHeight,
       deviceType.u_height,
     );
-    const slot =
-      col !== null
-        ? slots.find((s) => s.position.col === col && s.position.row === row)
-        : undefined;
+
+    const resolvedTarget = detectContainerDropTarget(
+      rack,
+      deviceLibrary,
+      draggedDevice,
+      mouseY,
+      xOffsetInRack,
+      rackWidth,
+      rackHeight,
+      uHeight,
+      faceFilter,
+      excludeDeviceId,
+    );
+    const resolvedForContainer =
+      resolvedTarget?.containerId === placedDevice.id ? resolvedTarget : null;
 
     return {
       containerId: placedDevice.id,
-      targetSlotId: slot?.id ?? null,
-      isValidTarget: slot
-        ? canPlaceInSlot(draggedDevice, slot, {
-            rackWidth: rack.width,
-            containerHeightUnits: deviceType.u_height,
-          })
-        : false,
+      targetSlotId: resolvedForContainer?.slotId ?? slot?.id ?? null,
+      isValidTarget: resolvedForContainer !== null,
     };
   }
 

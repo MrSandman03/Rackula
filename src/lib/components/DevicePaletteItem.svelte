@@ -26,6 +26,7 @@
   import { highlightMatch } from "$lib/utils/searchHighlight";
   import PaletteDeviceContextMenu from "./PaletteDeviceContextMenu.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
+  import { Popover } from "$lib/components/ui/Popover";
   import type { RackFitSummary } from "$lib/utils/rack-fit";
 
   interface Props {
@@ -71,14 +72,23 @@
 
   // Check if device is half-width
   const isHalfWidth = $derived(device.slot_width === 1);
+  const fitGuidance = $derived<RackFitSummary | null>(
+    fitSummary ??
+      (placementRequirement
+        ? {
+            label: "Bay",
+            title: placementRequirement,
+            tone: "info",
+          }
+        : null),
+  );
 
   // Build accessible description for device
   const ariaDescription = $derived.by(() => {
     const parts = [deviceName, `${device.u_height}U`, device.category];
     if (isHalfWidth) parts.push("half-width");
     if (device.is_full_depth === false) parts.push("half-depth");
-    if (placementRequirement) parts.push(placementRequirement);
-    if (fitSummary) parts.push(fitSummary.title);
+    if (fitGuidance) parts.push(fitGuidance.title);
     if (isFavourite) parts.push("pinned");
     if (!isCompatible && incompatibilityReason)
       parts.push(`(${incompatibilityReason})`);
@@ -94,6 +104,7 @@
 
   // Track dragging state for visual feedback
   let isDragging = $state(false);
+  let showFitDetails = $state(false);
 
   // Context menu state (right-click for custom devices)
   let contextMenuOpen = $state(false);
@@ -102,6 +113,7 @@
   let showConfirmDelete = $state(false);
 
   function handleClick() {
+    if (!isCompatible) return;
     onselect?.(new CustomEvent("select", { detail: { device } }));
   }
 
@@ -113,8 +125,40 @@
       // window where the placement handler would immediately place at the seeded
       // slot, collapsing pick-up and place into one keystroke.
       event.stopPropagation();
+      if (!isCompatible) return;
       onselect?.(new CustomEvent("select", { detail: { device } }));
     }
+  }
+
+  function handleFitDetailsKeyDown(event: KeyboardEvent) {
+    if (event.key === "Escape" && showFitDetails) {
+      event.preventDefault();
+      event.stopPropagation();
+      showFitDetails = false;
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.stopPropagation();
+    }
+  }
+
+  function handleFitDetailsContentKeyDown(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    showFitDetails = false;
+  }
+
+  function handleFitDetailsEscape(event: KeyboardEvent) {
+    // Bits UI passes a cloned event to this callback. Keep the popover's escape
+    // layer mounted for the rest of the original document event, then close it
+    // in the next task so the parent Device Library dialog never becomes the
+    // responsible layer during the same dispatch.
+    event.preventDefault();
+    event.stopPropagation();
+    setTimeout(() => {
+      showFitDetails = false;
+    }, 0);
   }
 
   function handleDeleteClick(event: MouseEvent) {
@@ -249,78 +293,100 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   class="device-palette-item"
   class:dragging={isDragging}
   class:library-selected={librarySelected}
   class:incompatible={!isCompatible}
   role="listitem"
-  tabindex="0"
   draggable={isCompatible}
   data-testid="device-palette-item"
-  title={!isCompatible ? (incompatibilityReason ?? undefined) : undefined}
-  onclick={handleClick}
-  onkeydown={handleKeyDown}
   oncontextmenu={handleContextMenu}
   ondragstart={handleDragStart}
   ondragend={handleDragEnd}
   aria-label={ariaDescription}
 >
-  <span class="drag-handle" aria-hidden="true">
-    <IconGrip size={ICON_SIZE.sm} />
-  </span>
-  <span class="category-icon-indicator" style="color: {device.colour}">
-    <CategoryIcon category={device.category} size={ICON_SIZE.sm} />
-  </span>
-  <span class="device-name" title={isCompatible ? deviceName : undefined}>
-    {#each highlightedSegments as segment, i (i)}
-      {#if segment.isMatch}
-        <strong>{segment.text}</strong>
-      {:else}
-        {segment.text}
+  <button
+    type="button"
+    class="device-select-btn"
+    data-testid="device-palette-select"
+    title={!isCompatible ? (incompatibilityReason ?? undefined) : undefined}
+    aria-label={isCompatible
+      ? `Place ${deviceName}`
+      : `${deviceName}. ${incompatibilityReason ?? "Incompatible with current rack"}`}
+    aria-disabled={!isCompatible}
+    onclick={handleClick}
+    onkeydown={handleKeyDown}
+  >
+    <span class="drag-handle" aria-hidden="true">
+      <IconGrip size={ICON_SIZE.sm} />
+    </span>
+    <span class="category-icon-indicator" style="color: {device.colour}">
+      <CategoryIcon category={device.category} size={ICON_SIZE.sm} />
+    </span>
+    <span class="device-name" title={isCompatible ? deviceName : undefined}>
+      {#each highlightedSegments as segment, i (i)}
+        {#if segment.isMatch}
+          <strong>{segment.text}</strong>
+        {:else}
+          {segment.text}
+        {/if}
+      {/each}
+    </span>
+    {#if device.front_image || device.rear_image}
+      <ImageIndicator
+        front={device.front_image}
+        rear={device.rear_image}
+        size={14}
+      />
+    {/if}
+    <span class="device-spec">
+      <span class="device-height">{device.u_height}U</span>
+      {#if isHalfWidth}
+        <span
+          class="form-marker"
+          title="Half-width: Mounts inside a carrier, not directly on the rails"
+          aria-label="Half-width device">½W</span
+        >
       {/if}
-    {/each}
-  </span>
-  {#if device.front_image || device.rear_image}
-    <ImageIndicator
-      front={device.front_image}
-      rear={device.rear_image}
-      size={14}
-    />
+      {#if device.is_full_depth === false}
+        <span
+          class="form-marker"
+          title="Half-depth: Mounts on one face only"
+          aria-label="Half-depth device">½D</span
+        >
+      {/if}
+    </span>
+  </button>
+  {#if fitGuidance}
+    <span class="fit-guidance">
+      <Popover.Root bind:open={showFitDetails}>
+        <Popover.Trigger
+          class="form-marker fit-marker fit-marker--{fitGuidance.tone}"
+          title={fitGuidance.title}
+          aria-label={`Fit details: ${fitGuidance.title}`}
+          onkeydown={handleFitDetailsKeyDown}
+        >
+          {fitGuidance.label}
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Content
+            class="fit-detail"
+            side="bottom"
+            align="end"
+            sideOffset={4}
+            collisionPadding={12}
+            onEscapeKeydown={handleFitDetailsEscape}
+            onkeydown={handleFitDetailsContentKeyDown}
+          >
+            <span role="status" data-testid="fit-detail-popover">
+              {fitGuidance.title}
+            </span>
+          </Popover.Content>
+        </Popover.Portal>
+      </Popover.Root>
+    </span>
   {/if}
-  <span class="device-spec">
-    <span class="device-height">{device.u_height}U</span>
-    {#if isHalfWidth}
-      <span
-        class="form-marker"
-        title="Half-width: Mounts inside a carrier, not directly on the rails"
-        aria-label="Half-width device">½W</span
-      >
-    {/if}
-    {#if device.is_full_depth === false}
-      <span
-        class="form-marker"
-        title="Half-depth: Mounts on one face only"
-        aria-label="Half-depth device">½D</span
-      >
-    {/if}
-    {#if placementRequirement}
-      <span
-        class="form-marker mount-marker"
-        title={placementRequirement}
-        aria-label={placementRequirement}>Bay</span
-      >
-    {/if}
-    {#if fitSummary}
-      <span
-        class="form-marker fit-marker fit-marker--{fitSummary.tone}"
-        title={fitSummary.title}
-        aria-label={fitSummary.title}>{fitSummary.label}</span
-      >
-    {/if}
-  </span>
   <Tooltip text={isFavourite ? "Unpin device" : "Pin device"} position="left">
     {#snippet triggerChild({ props })}
       <button
@@ -385,9 +451,11 @@
 <style>
   .device-palette-item {
     display: flex;
+    flex: 0 0 var(--touch-target-min);
     align-items: center;
     gap: var(--space-1);
-    padding: var(--space-2) var(--space-3);
+    height: var(--touch-target-min);
+    padding: 0 var(--space-3);
     min-height: var(--touch-target-min);
     border-radius: var(--radius-sm);
     cursor: grab;
@@ -417,6 +485,28 @@
   .device-palette-item:focus-visible {
     outline: 2px solid var(--colour-focus-ring);
     outline-offset: var(--space-1);
+  }
+
+  .device-select-btn {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    cursor: inherit;
+    text-align: left;
+  }
+
+  .device-select-btn:focus-visible {
+    outline: 2px solid var(--colour-focus-ring);
+    outline-offset: 1px;
+    border-radius: var(--radius-sm);
   }
 
   .device-palette-item.library-selected {
@@ -509,19 +599,58 @@
     cursor: help;
   }
 
-  .fit-marker--ok {
+  .fit-guidance {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  :global(.fit-marker) {
+    flex-shrink: 0;
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    padding: 0 var(--space-1);
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-sm);
+    cursor: help;
+    white-space: nowrap;
+  }
+
+  :global(.fit-marker:focus-visible) {
+    outline: 2px solid var(--colour-focus-ring);
+    outline-offset: 1px;
+  }
+
+  :global(.fit-detail) {
+    z-index: var(--z-tooltip, 1000);
+    width: max-content;
+    max-width: min(16rem, calc(100vw - var(--space-6)));
+    padding: var(--space-2);
+    border: 1px solid var(--colour-border);
+    border-radius: var(--radius-sm);
+    background: var(--colour-surface-overlay);
+    box-shadow: var(--shadow-md);
+    color: var(--colour-text-inverse);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-normal);
+    line-height: 1.4;
+    white-space: normal;
+  }
+
+  :global(.fit-marker--ok) {
     color: var(--colour-success);
   }
 
-  .fit-marker--info {
+  :global(.fit-marker--info) {
     color: var(--colour-info, var(--colour-accent));
   }
 
-  .fit-marker--warn {
+  :global(.fit-marker--warn) {
     color: var(--colour-warning);
   }
 
-  .fit-marker--blocked {
+  :global(.fit-marker--blocked) {
     color: var(--colour-error);
   }
 
@@ -601,5 +730,13 @@
     opacity: 1;
     outline: 2px solid var(--colour-focus-ring);
     outline-offset: 1px;
+  }
+
+  @media (max-width: 1024px), (hover: none), (pointer: coarse) {
+    .favourite-btn {
+      width: var(--touch-target-min);
+      height: var(--touch-target-min);
+      opacity: 1;
+    }
   }
 </style>

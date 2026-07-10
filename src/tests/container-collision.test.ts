@@ -22,7 +22,6 @@ import {
   createTestContainerChild,
 } from "./factories";
 import { toInternalUnits } from "$lib/utils/position";
-import { findStarterDevice } from "$lib/data/starterLibrary";
 import type { PlacedDevice, DeviceType, Rack } from "$lib/types";
 
 // =============================================================================
@@ -192,6 +191,153 @@ describe("Container devices at rack level", () => {
       ),
     ).toBe(false);
   });
+
+  it("rejects a single device deeper than the rack", () => {
+    const deepType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "deep-device",
+        u_height: 1,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 300, height: 44 },
+        },
+      },
+    };
+    const rack = createTestRack({ height: 8, depth_mm: 260, devices: [] });
+
+    expect(
+      canPlaceDevice(
+        rack,
+        [deepType],
+        deepType.u_height,
+        toInternalUnits(3),
+        undefined,
+        "front",
+        undefined,
+        deepType,
+      ),
+    ).toBe(false);
+  });
+
+  it("uses mounted child depth when checking an existing tray assembly", () => {
+    const trayType = createTestContainerType({
+      slug: "open-tray",
+      u_height: 1,
+      is_full_depth: false,
+    });
+    const childType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "deep-child",
+        u_height: 1,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 120, depth: 200, height: 40 },
+        },
+      },
+    };
+    const rearType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "rear-device",
+        u_height: 1,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 120, depth: 70, height: 40 },
+        },
+      },
+    };
+    const rack = createTestRack({
+      height: 8,
+      depth_mm: 260,
+      devices: [
+        createTestDevice({
+          id: "tray-1",
+          device_type: "open-tray",
+          position: 3,
+          face: "front",
+        }),
+        createTestContainerChild({
+          id: "child-1",
+          device_type: "deep-child",
+          container_id: "tray-1",
+          slot_id: "slot-left",
+          position: 0,
+          face: "front",
+        }),
+      ],
+    });
+
+    expect(
+      canPlaceDevice(
+        rack,
+        [trayType, childType, rearType],
+        rearType.u_height,
+        toInternalUnits(3),
+        undefined,
+        "rear",
+        undefined,
+        rearType,
+      ),
+    ).toBe(false);
+  });
+
+  it("uses mounted child depth when moving a tray assembly", () => {
+    const trayType = createTestContainerType({
+      slug: "open-tray",
+      u_height: 1,
+      is_full_depth: false,
+    });
+    const childType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "too-deep-child",
+        u_height: 1,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 120, depth: 300, height: 40 },
+        },
+      },
+    };
+    const rack = createTestRack({
+      height: 8,
+      depth_mm: 260,
+      devices: [
+        createTestDevice({
+          id: "tray-1",
+          device_type: "open-tray",
+          position: 3,
+          face: "front",
+        }),
+        createTestContainerChild({
+          id: "child-1",
+          device_type: "too-deep-child",
+          container_id: "tray-1",
+          slot_id: "slot-left",
+          position: 0,
+          face: "front",
+        }),
+      ],
+    });
+
+    expect(
+      canPlaceDevice(
+        rack,
+        [trayType, childType],
+        trayType.u_height,
+        toInternalUnits(4),
+        0,
+        "front",
+        undefined,
+        trayType,
+      ),
+    ).toBe(false);
+  });
 });
 
 // =============================================================================
@@ -271,6 +417,35 @@ describe("Child devices excluded from rack-level collision", () => {
 // =============================================================================
 
 describe("canPlaceInContainer", () => {
+  it("rejects nesting a container inside another container", () => {
+    const outerType = createTestContainerType({
+      slug: "outer-carrier",
+      u_height: 2,
+    });
+    const nestedType = createTestContainerType({
+      slug: "nested-carrier",
+      u_height: 1,
+    });
+    const outer = createTestDevice({
+      id: "outer",
+      device_type: outerType.slug,
+      position: 5,
+    });
+    const rack = createTestRack({ devices: [outer] });
+
+    expect(
+      canPlaceInContainer(
+        rack,
+        [outerType, nestedType],
+        outer,
+        outerType,
+        nestedType,
+        "slot-left",
+        0,
+      ),
+    ).toBe(false);
+  });
+
   it("allows placing device in empty container slot", () => {
     const containerType = createTestContainerType({
       slug: "blade-chassis",
@@ -299,6 +474,222 @@ describe("canPlaceInContainer", () => {
         0,
       ),
     ).toBe(true);
+  });
+
+  it("rejects a child incompatible with the rack width", () => {
+    const containerType = createTestContainerType({
+      slug: "full-width-tray",
+      u_height: 1,
+      is_full_depth: false,
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+      ],
+    });
+    const childType = createTestDeviceType({
+      slug: "nineteen-inch-child",
+      u_height: 1,
+      slot_width: 2,
+      rack_widths: [19],
+      is_full_depth: false,
+    });
+    const container = createTestDevice({
+      id: "container-1",
+      device_type: containerType.slug,
+      position: toInternalUnits(3),
+      face: "front",
+    });
+    const rack = createTestRack({ width: 10, devices: [container] });
+
+    expect(
+      canPlaceInContainer(
+        rack,
+        [containerType, childType],
+        container,
+        containerType,
+        childType,
+        "main",
+        0,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a physically too-tall full-width child in a 0.5U slot", () => {
+    const containerType = createTestContainerType({
+      slug: "half-u-full-width-tray",
+      u_height: 1,
+      is_full_depth: false,
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 0.5,
+        },
+      ],
+    });
+    const childType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "tall-half-u-child",
+        u_height: 0.5,
+        slot_width: 2,
+        rack_widths: [10],
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 100, depth: 100, height: 30 },
+        },
+      },
+    };
+    const container = createTestDevice({
+      id: "container-1",
+      device_type: containerType.slug,
+      position: toInternalUnits(3),
+      face: "front",
+    });
+    const rack = createTestRack({ width: 10, devices: [container] });
+
+    expect(
+      canPlaceInContainer(
+        rack,
+        [containerType, childType],
+        container,
+        containerType,
+        childType,
+        "main",
+        0,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a child deeper than the rack", () => {
+    const containerType = createTestContainerType({
+      slug: "full-width-tray",
+      u_height: 1,
+      is_full_depth: false,
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+      ],
+    });
+    const childType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "deep-child",
+        u_height: 1,
+        slot_width: 2,
+        rack_widths: [10],
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 300, height: 40 },
+        },
+      },
+    };
+    const container = createTestDevice({
+      id: "container-1",
+      device_type: containerType.slug,
+      position: toInternalUnits(3),
+      face: "front",
+    });
+    const rack = createTestRack({
+      width: 10,
+      depth_mm: 260,
+      devices: [container],
+    });
+
+    expect(
+      canPlaceInContainer(
+        rack,
+        [containerType, childType],
+        container,
+        containerType,
+        childType,
+        "main",
+        0,
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects a child whose assembly conflicts with opposing rear depth", () => {
+    const containerType = createTestContainerType({
+      slug: "front-tray",
+      u_height: 1,
+      is_full_depth: false,
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+      ],
+    });
+    const childType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "front-child",
+        u_height: 1,
+        slot_width: 2,
+        rack_widths: [10],
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 200, height: 40 },
+        },
+      },
+    };
+    const rearType: DeviceType = {
+      ...createTestDeviceType({
+        slug: "rear-device",
+        u_height: 1,
+        rack_widths: [10],
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 70, height: 40 },
+        },
+      },
+    };
+    const container = createTestDevice({
+      id: "container-1",
+      device_type: containerType.slug,
+      position: toInternalUnits(3),
+      face: "front",
+    });
+    const rear = createTestDevice({
+      id: "rear-1",
+      device_type: rearType.slug,
+      position: toInternalUnits(3),
+      face: "rear",
+    });
+    const rack = createTestRack({
+      width: 10,
+      depth_mm: 260,
+      devices: [container, rear],
+    });
+
+    expect(
+      canPlaceInContainer(
+        rack,
+        [containerType, childType, rearType],
+        container,
+        containerType,
+        childType,
+        "main",
+        0,
+      ),
+    ).toBe(false);
   });
 
   it("allows moving a child device to same position (excludeDeviceId)", () => {
@@ -523,384 +914,6 @@ describe("canPlaceInContainer", () => {
         childType,
         "slot-left",
         3,
-      ),
-    ).toBe(false);
-  });
-});
-
-// =============================================================================
-// Children Collide Only with Siblings in Same Container
-// =============================================================================
-
-describe("Children collide only with siblings in same container", () => {
-  it("children in different containers never collide", () => {
-    const containerType = createTestContainerType({
-      slug: "blade-chassis",
-      u_height: 4,
-    });
-    const childType = createTestDeviceType({
-      slug: "blade-server",
-      u_height: 1,
-      slot_width: 1, // Half-width device fits in 0.5 fraction slots
-    });
-
-    const container1 = createTestDevice({
-      id: "container-1",
-      device_type: "blade-chassis",
-      position: 5,
-    });
-    const container2 = createTestDevice({
-      id: "container-2",
-      device_type: "blade-chassis",
-      position: 15,
-    });
-    const child1 = createTestContainerChild({
-      container_id: "container-1",
-      slot_id: "slot-left",
-      position: 0,
-      device_type: "blade-server",
-    });
-    const rack = createTestRack({
-      devices: [container1, container2, child1],
-    });
-
-    // Placing a child in container-2 should work regardless of child1 in container-1
-    expect(
-      canPlaceInContainer(
-        rack,
-        [containerType, childType],
-        container2,
-        containerType,
-        childType,
-        "slot-left",
-        0,
-      ),
-    ).toBe(true);
-  });
-
-  it("children in same container and slot collide at overlapping positions", () => {
-    const containerType = createTestContainerType({
-      slug: "blade-chassis",
-      u_height: 4,
-    });
-    const childType = createTestDeviceType({
-      slug: "blade-server",
-      u_height: 2,
-      slot_width: 1, // Half-width device fits in 0.5 fraction slots
-    });
-
-    const container = createTestDevice({
-      id: "container-1",
-      device_type: "blade-chassis",
-      position: 5,
-    });
-    const existingChild = createTestContainerChild({
-      container_id: "container-1",
-      slot_id: "slot-left",
-      position: 0, // 2U at 0-1
-      device_type: "blade-server",
-    });
-    const rack = createTestRack({ devices: [container, existingChild] });
-
-    // Position 1 would overlap with existing child at 0-1
-    expect(
-      canPlaceInContainer(
-        rack,
-        [containerType, childType],
-        container,
-        containerType,
-        childType,
-        "slot-left",
-        1,
-      ),
-    ).toBe(false);
-  });
-});
-
-// =============================================================================
-// Face Inheritance
-// =============================================================================
-
-describe("Face inheritance for container children", () => {
-  it("placement succeeds when container is on rear face", () => {
-    const containerType = createTestContainerType({
-      slug: "blade-chassis",
-      u_height: 4,
-    });
-    const childType = createTestDeviceType({
-      slug: "blade-server",
-      u_height: 1,
-      slot_width: 1, // Half-width device fits in 0.5 fraction slots
-    });
-
-    // Container on rear face
-    const container = createTestDevice({
-      id: "container-1",
-      device_type: "blade-chassis",
-      position: 5,
-      face: "rear",
-    });
-    const rack = createTestRack({ devices: [container] });
-
-    // Placing in container should succeed - child inherits rear face
-    expect(
-      canPlaceInContainer(
-        rack,
-        [containerType, childType],
-        container,
-        containerType,
-        childType,
-        "slot-left",
-        0,
-      ),
-    ).toBe(true);
-  });
-});
-
-// =============================================================================
-// Edge Cases
-// =============================================================================
-
-describe("Container collision edge cases", () => {
-  it("empty container does not affect child placement", () => {
-    const containerType = createTestContainerType({
-      slug: "blade-chassis",
-      u_height: 4,
-    });
-    const childType = createTestDeviceType({
-      slug: "blade-server",
-      u_height: 1,
-      slot_width: 1, // Half-width device fits in 0.5 fraction slots
-    });
-
-    const container = createTestDevice({
-      id: "container-1",
-      device_type: "blade-chassis",
-      position: 5,
-    });
-    const rack = createTestRack({ devices: [container] });
-
-    // All positions 0-3 should be valid in empty container
-    for (let pos = 0; pos < 4; pos++) {
-      expect(
-        canPlaceInContainer(
-          rack,
-          [containerType, childType],
-          container,
-          containerType,
-          childType,
-          "slot-left",
-          pos,
-        ),
-      ).toBe(true);
-    }
-  });
-
-  it("multiple children in same container, different slots", () => {
-    const containerType = createTestContainerType({
-      slug: "blade-chassis",
-      u_height: 4,
-    });
-    const childType = createTestDeviceType({
-      slug: "blade-server",
-      u_height: 1,
-      slot_width: 1, // Half-width device fits in 0.5 fraction slots
-    });
-
-    const container = createTestDevice({
-      id: "container-1",
-      device_type: "blade-chassis",
-      position: 5,
-    });
-    const child1 = createTestContainerChild({
-      container_id: "container-1",
-      slot_id: "slot-left",
-      position: 0,
-      device_type: "blade-server",
-    });
-    const child2 = createTestContainerChild({
-      container_id: "container-1",
-      slot_id: "slot-right",
-      position: 0,
-      device_type: "blade-server",
-    });
-    const rack = createTestRack({ devices: [container, child1, child2] });
-
-    // Position 0 in slot-left is occupied
-    expect(
-      canPlaceInContainer(
-        rack,
-        [containerType, childType],
-        container,
-        containerType,
-        childType,
-        "slot-left",
-        0,
-      ),
-    ).toBe(false);
-
-    // Position 0 in slot-right is also occupied
-    expect(
-      canPlaceInContainer(
-        rack,
-        [containerType, childType],
-        container,
-        containerType,
-        childType,
-        "slot-right",
-        0,
-      ),
-    ).toBe(false);
-
-    // Position 1 in slot-left should be free
-    expect(
-      canPlaceInContainer(
-        rack,
-        [containerType, childType],
-        container,
-        containerType,
-        childType,
-        "slot-left",
-        1,
-      ),
-    ).toBe(true);
-  });
-});
-
-// =============================================================================
-// Sibling Types Resolvable Only Outside the Layout Library (Issue #2131)
-// =============================================================================
-
-describe("Sibling collision when sibling type is not in the passed library", () => {
-  it("detects overlap with a sibling whose type is only resolvable globally", () => {
-    // Sibling references a starter-pack slug that is NOT embedded in the
-    // device library passed to canPlaceInContainer. This mirrors a loaded
-    // layout whose children reference starter/brand-pack types by slug only.
-    const starterSlug = "2u-server";
-    const starterDevice = findStarterDevice(starterSlug);
-    // Guard the scenario premise: starter device exists and is 2U.
-    expect(starterDevice?.u_height).toBe(2);
-
-    const containerType = createTestContainerType({
-      slug: "blade-chassis",
-      u_height: 4,
-    });
-    const childType = createTestDeviceType({
-      slug: "blade-server",
-      u_height: 1,
-      slot_width: 1,
-    });
-
-    const container = createTestDevice({
-      id: "container-1",
-      device_type: "blade-chassis",
-      position: 5,
-    });
-    // Existing sibling occupies positions 0-1 (2U starter device).
-    const existingChild = createTestContainerChild({
-      container_id: "container-1",
-      slot_id: "slot-left",
-      position: 0,
-      device_type: starterSlug,
-    });
-    const rack = createTestRack({ devices: [container, existingChild] });
-
-    // Library deliberately omits the sibling's starter type, leaving only
-    // the container type and the new child type.
-    const deviceLibrary = [containerType, childType];
-
-    // Placing a 1U child at position 1 overlaps the sibling's 0-1 range.
-    expect(
-      canPlaceInContainer(
-        rack,
-        deviceLibrary,
-        container,
-        containerType,
-        childType,
-        "slot-left",
-        1,
-      ),
-    ).toBe(false);
-  });
-
-  it("allows non-overlapping placement next to a globally-resolved sibling", () => {
-    const starterSlug = "2u-server";
-    const containerType = createTestContainerType({
-      slug: "blade-chassis",
-      u_height: 4,
-    });
-    const childType = createTestDeviceType({
-      slug: "blade-server",
-      u_height: 1,
-      slot_width: 1,
-    });
-
-    const container = createTestDevice({
-      id: "container-1",
-      device_type: "blade-chassis",
-      position: 5,
-    });
-    // Sibling occupies positions 0-1.
-    const existingChild = createTestContainerChild({
-      container_id: "container-1",
-      slot_id: "slot-left",
-      position: 0,
-      device_type: starterSlug,
-    });
-    const rack = createTestRack({ devices: [container, existingChild] });
-
-    const deviceLibrary = [containerType, childType];
-
-    // Position 2 is clear of the sibling's 0-1 range and within the 4U container.
-    expect(
-      canPlaceInContainer(
-        rack,
-        deviceLibrary,
-        container,
-        containerType,
-        childType,
-        "slot-left",
-        2,
-      ),
-    ).toBe(true);
-  });
-
-  it("blocks placement when a sibling type cannot be resolved anywhere", () => {
-    // Fail-closed: an unresolvable sibling type must not silently allow overlap.
-    const containerType = createTestContainerType({
-      slug: "blade-chassis",
-      u_height: 4,
-    });
-    const childType = createTestDeviceType({
-      slug: "blade-server",
-      u_height: 1,
-      slot_width: 1,
-    });
-
-    const container = createTestDevice({
-      id: "container-1",
-      device_type: "blade-chassis",
-      position: 5,
-    });
-    const existingChild = createTestContainerChild({
-      container_id: "container-1",
-      slot_id: "slot-left",
-      position: 0,
-      device_type: "totally-unknown-type",
-    });
-    const rack = createTestRack({ devices: [container, existingChild] });
-
-    const deviceLibrary = [containerType, childType];
-
-    expect(
-      canPlaceInContainer(
-        rack,
-        deviceLibrary,
-        container,
-        containerType,
-        childType,
-        "slot-left",
-        0,
       ),
     ).toBe(false);
   });

@@ -232,6 +232,34 @@ describe("Layout Store", () => {
       }
     });
 
+    it.each([
+      ["desc_units", false, true],
+      ["starting_unit", 1, 10],
+    ] as const)(
+      "repairs divergent bayed %s peers when the origin already matches",
+      (key, requestedValue, divergentValue) => {
+        const store = getLayoutStore();
+        const result = store.addBayedRackGroup("Bayed", 2, 12);
+        expect(result).not.toBeNull();
+        const [origin, peer] = result!.racks;
+
+        store.updateRackRaw({ [key]: divergentValue }, peer.id);
+        store.clearHistory();
+        expect(store.getRackById(origin.id)?.[key]).toBe(requestedValue);
+        expect(store.getRackById(peer.id)?.[key]).toBe(divergentValue);
+
+        store.updateRack(origin.id, { [key]: requestedValue });
+
+        expect(store.getRackById(origin.id)?.[key]).toBe(requestedValue);
+        expect(store.getRackById(peer.id)?.[key]).toBe(requestedValue);
+        expect(store.undo()).toBe(true);
+        expect(store.getRackById(origin.id)?.[key]).toBe(requestedValue);
+        expect(store.getRackById(peer.id)?.[key]).toBe(divergentValue);
+        expect(store.redo()).toBe(true);
+        expect(store.getRackById(peer.id)?.[key]).toBe(requestedValue);
+      },
+    );
+
     it("rejects a height change for a bayed-group member (#2222)", () => {
       const store = getLayoutStore();
       const result = store.addBayedRackGroup("Bayed", 2, 12);

@@ -16,9 +16,12 @@
   import { getUIStore } from "$lib/stores/ui.svelte";
   import { getCanvasStore } from "$lib/stores/canvas.svelte";
   import {
+    canFitRackDimensions,
     canResizeRackTo,
     getConflictDetails,
     formatConflictMessage,
+    parseRackHeightInput,
+    RACK_HEIGHT_INPUT_ERROR,
   } from "$lib/utils/rack-resize";
   import {
     COMMON_RACK_HEIGHTS,
@@ -30,6 +33,12 @@
     DEFAULT_RACK_DEPTH_MM,
     DEFAULT_RACK_BASE_WEIGHT,
   } from "$lib/types/constants";
+  import { isRackMateT1Plus } from "$lib/utils/rack-profile";
+  import { planRackProfileChange } from "$lib/utils/rack-profile-change";
+  import {
+    BAYED_WIDTH_DIVERGENCE_ERROR,
+    isBayedRackUpdateAllowed,
+  } from "$lib/utils/rack-bay-invariants";
   import type {
     Rack,
     RackGroup,
@@ -63,13 +72,14 @@
   ];
 
   const heightPresets = $derived(
-    selectedRack.width === 10 ? MINI_RACK_HEIGHTS : COMMON_RACK_HEIGHTS,
+    isRackMateT1Plus(selectedRack) ? MINI_RACK_HEIGHTS : COMMON_RACK_HEIGHTS,
   );
   const depthPresets = $derived(
-    selectedRack.width === 10
+    isRackMateT1Plus(selectedRack)
       ? RACKMATE_DEPTH_PRESETS_MM
       : RACK_DEPTH_PRESETS_MM,
   );
+  const isRackMateRack = $derived(isRackMateT1Plus(selectedRack));
 
   // Local state for form fields
   let rackName = $state("");
@@ -78,10 +88,23 @@
   let rackDepth = $state(DEFAULT_RACK_DEPTH_MM);
   let rackWeight = $state(DEFAULT_RACK_BASE_WEIGHT);
 
+  type ResizeErrorSource = "height" | "width" | "profile";
+
   // Resize validation error state
   let resizeError = $state<string | null>(null);
+  let resizeErrorSource = $state<ResizeErrorSource | null>(null);
   let depthError = $state<string | null>(null);
   let weightError = $state<string | null>(null);
+
+  function clearResizeError() {
+    resizeError = null;
+    resizeErrorSource = null;
+  }
+
+  function setResizeError(source: ResizeErrorSource, message: string) {
+    resizeError = message;
+    resizeErrorSource = source;
+  }
 
   // Sync local state with selected rack/group and clear errors
   $effect(() => {
@@ -91,15 +114,14 @@
     rackNotes = selectedRack.notes ?? "";
     rackDepth = selectedRack.depth_mm ?? DEFAULT_RACK_DEPTH_MM;
     rackWeight = selectedRack.base_weight ?? DEFAULT_RACK_BASE_WEIGHT;
-    resizeError = null; // Clear any previous resize error
+    clearResizeError();
     depthError = null;
     weightError = null;
   });
 
-  // In this RackMate-focused fork, a 10-inch rack means the user's RackMate T1
-  // Plus. Keep its physical profile pinned when doing so is non-destructive.
+  // Keep explicit RackMate profiles pinned to their physical dimensions.
   $effect(() => {
-    if (selectedRack.width !== 10) return;
+    if (!isRackMateRack) return;
 
     if (selectedRack.depth_mm !== RACKMATE_T1_PLUS_DEPTH_MM) {
       rackDepth = RACKMATE_T1_PLUS_DEPTH_MM;
@@ -125,7 +147,10 @@
           result.conflicts,
           layoutStore.device_types,
         );
-        resizeError = `RackMate T1 Plus is 8U; ${formatConflictMessage(conflictDetails)}`;
+        setResizeError(
+          "height",
+          `RackMate T1 Plus is 8U; ${formatConflictMessage(conflictDetails)}`,
+        );
         rackHeight = selectedRack.height;
       }
     }
@@ -165,8 +190,8 @@
 
   // Validate and apply height change
   function attemptHeightChange(newHeight: number): boolean {
-    if (selectedRack.width === 10 && newHeight !== RACKMATE_T1_PLUS_HEIGHT) {
-      resizeError = "RackMate T1 Plus height is locked to 8U.";
+    if (isRackMateRack && newHeight !== RACKMATE_T1_PLUS_HEIGHT) {
+      setResizeError("height", "RackMate T1 Plus height is locked to 8U.");
       rackHeight = selectedRack.height;
       return false;
     }
@@ -175,7 +200,7 @@
     // already-active preset) is a no-op, not a resize attempt, so it must not
     // surface a rejection error (#2222).
     if (newHeight === selectedRack.height) {
-      resizeError = null;
+      clearResizeError();
       return true;
     }
 
@@ -186,7 +211,7 @@
     // the group or an individual bay was selected.
     const group = layoutStore.getRackGroupForRack(selectedRack.id);
     if (group?.layout_preset === "bayed") {
-      resizeError = "Bayed racks must share the same height.";
+      setResizeError("height", "Bayed racks must share the same height.");
       rackHeight = selectedRack.height;
       return false;
     }
@@ -202,14 +227,14 @@
         result.conflicts,
         layoutStore.device_types,
       );
-      resizeError = formatConflictMessage(conflictDetails);
+      setResizeError("height", formatConflictMessage(conflictDetails));
       // Revert local state to current rack height
       rackHeight = selectedRack.height;
       return false;
     }
 
     // Clear error and apply change
-    resizeError = null;
+    clearResizeError();
     layoutStore.updateRack(selectedRack.id, { height: newHeight });
     // Reset view to center the resized rack
     canvasStore.fitAll(layoutStore.activeRack ? [layoutStore.activeRack] : []);
@@ -219,10 +244,15 @@
   // Update rack height on input change
   function handleHeightChange(event: Event) {
     const target = event.target as HTMLInputElement;
-    const newHeight = parseInt(target.value, 10);
-    if (newHeight >= 1 && newHeight <= 100) {
-      attemptHeightChange(newHeight);
+    const newHeight = parseRackHeightInput(target.value);
+    if (newHeight === null) {
+      setResizeError("height", RACK_HEIGHT_INPUT_ERROR);
+      rackHeight = selectedRack.height;
+      target.value = String(selectedRack.height);
+      return;
     }
+
+    attemptHeightChange(newHeight);
   }
 
   // Handle preset button click
@@ -232,23 +262,90 @@
   }
 
   function handleWidthPresetClick(width: Rack["width"]) {
-    if (width === 10 && selectedRack.height !== RACKMATE_T1_PLUS_HEIGHT) {
-      rackHeight = RACKMATE_T1_PLUS_HEIGHT;
-      if (!attemptHeightChange(RACKMATE_T1_PLUS_HEIGHT)) {
-        return;
-      }
+    if (width === selectedRack.width) {
+      clearResizeError();
+      return;
     }
 
-    layoutStore.updateRack(selectedRack.id, {
+    const group =
+      selectedGroup ?? layoutStore.getRackGroupForRack(selectedRack.id);
+    const updates = {
       width,
-      ...(width === 10 ? { depth_mm: RACKMATE_T1_PLUS_DEPTH_MM } : {}),
-    });
+      ...(isRackMateRack ? { profile: "generic" as const } : {}),
+    };
+    if (
+      group?.layout_preset === "bayed" &&
+      !isBayedRackUpdateAllowed(selectedRack, updates, {
+        group,
+        racks: layoutStore.racks,
+      })
+    ) {
+      setResizeError("width", BAYED_WIDTH_DIVERGENCE_ERROR);
+      rackHeight = selectedRack.height;
+      rackDepth = selectedRack.depth_mm ?? DEFAULT_RACK_DEPTH_MM;
+      return;
+    }
+
+    const result = canFitRackDimensions(
+      selectedRack,
+      {
+        width,
+        height: selectedRack.height,
+        depth_mm: selectedRack.depth_mm,
+      },
+      layoutStore.device_types,
+    );
+    if (!result.allowed) {
+      const conflictDetails = getConflictDetails(
+        result.conflicts,
+        layoutStore.device_types,
+      );
+      setResizeError(
+        "width",
+        `${width}-inch rails cannot contain ${formatConflictMessage(conflictDetails)}`,
+      );
+      return;
+    }
+
+    clearResizeError();
+    layoutStore.updateRack(selectedRack.id, updates);
+  }
+
+  function handleProfileChange(profile: "generic" | "rackmate") {
+    const group =
+      selectedGroup ?? layoutStore.getRackGroupForRack(selectedRack.id);
+    const plan = planRackProfileChange(
+      selectedRack,
+      layoutStore.device_types,
+      profile,
+      group?.layout_preset === "bayed"
+        ? { group, racks: layoutStore.racks }
+        : undefined,
+    );
+
+    if (plan.kind === "noop") {
+      clearResizeError();
+      return;
+    }
+
+    if (plan.kind === "error") {
+      setResizeError("profile", plan.message);
+      rackHeight = selectedRack.height;
+      rackDepth = selectedRack.depth_mm ?? DEFAULT_RACK_DEPTH_MM;
+      return;
+    }
+
+    rackHeight = plan.updates.height ?? selectedRack.height;
+    rackDepth =
+      plan.updates.depth_mm ?? selectedRack.depth_mm ?? DEFAULT_RACK_DEPTH_MM;
+    clearResizeError();
+    layoutStore.updateRack(selectedRack.id, plan.updates);
   }
 
   // Apply a depth value in millimetres. Rejects blank, non-finite, and
   // non-positive input so the store never receives an invalid measurement.
   function applyDepth(value: number) {
-    if (selectedRack.width === 10 && value !== RACKMATE_T1_PLUS_DEPTH_MM) {
+    if (isRackMateRack && value !== RACKMATE_T1_PLUS_DEPTH_MM) {
       depthError = "RackMate T1 Plus depth is locked to 260 mm.";
       rackDepth = RACKMATE_T1_PLUS_DEPTH_MM;
       if (selectedRack.depth_mm !== RACKMATE_T1_PLUS_DEPTH_MM) {
@@ -337,15 +434,17 @@
       type="number"
       id="rack-height"
       class="input-field"
-      class:error={resizeError !== null}
+      class:error={resizeErrorSource === "height"}
       bind:value={rackHeight}
       onchange={handleHeightChange}
       min="1"
       max="100"
+      step="1"
+      aria-invalid={resizeErrorSource === "height"}
+      aria-describedby={resizeErrorSource === "height"
+        ? "rack-height-error"
+        : undefined}
     />
-    {#if resizeError}
-      <p class="helper-text error">Cannot resize: {resizeError}</p>
-    {/if}
     <div class="height-presets">
       {#each heightPresets as preset (preset)}
         <button
@@ -359,11 +458,23 @@
         </button>
       {/each}
     </div>
+    {#if resizeErrorSource === "height" && resizeError}
+      <p id="rack-height-error" class="helper-text error" role="alert">
+        Cannot resize: {resizeError}
+      </p>
+    {/if}
   </div>
 
   <div class="form-group">
     <label for="rack-width">Width</label>
-    <div class="preset-row" role="group" aria-label="Rack width in inches">
+    <div
+      class="preset-row"
+      role="group"
+      aria-label="Rack width in inches"
+      aria-describedby={resizeErrorSource === "width"
+        ? "rack-width-error"
+        : undefined}
+    >
       {#each widthOptions as option (option)}
         <button
           type="button"
@@ -376,6 +487,32 @@
         </button>
       {/each}
     </div>
+    {#if resizeErrorSource === "width" && resizeError}
+      <p id="rack-width-error" class="helper-text error" role="alert">
+        Cannot resize: {resizeError}
+      </p>
+    {/if}
+  </div>
+
+  <div class="form-group">
+    <span class="field-label">Profile</span>
+    <SegmentedControl
+      options={[
+        { value: "generic", label: "Generic" },
+        { value: "rackmate", label: "RackMate T1 Plus" },
+      ]}
+      value={isRackMateRack ? "rackmate" : "generic"}
+      onchange={(value) => handleProfileChange(value as "generic" | "rackmate")}
+      ariaLabel="Rack profile"
+      ariaDescribedBy={resizeErrorSource === "profile"
+        ? "rack-profile-error"
+        : undefined}
+    />
+    {#if resizeErrorSource === "profile" && resizeError}
+      <p id="rack-profile-error" class="helper-text error" role="alert">
+        Cannot resize: {resizeError}
+      </p>
+    {/if}
   </div>
 
   <div class="form-group">
@@ -389,10 +526,14 @@
       onchange={handleDepthChange}
       min="1"
       step="1"
-      readonly={selectedRack.width === 10}
+      readonly={isRackMateRack}
+      aria-invalid={depthError !== null}
+      aria-describedby={depthError ? "rack-depth-error" : undefined}
     />
     {#if depthError}
-      <p class="helper-text error">{depthError}</p>
+      <p id="rack-depth-error" class="helper-text error" role="alert">
+        {depthError}
+      </p>
     {/if}
     <div class="preset-row">
       {#each depthPresets as preset (preset)}
@@ -545,7 +686,8 @@
     gap: var(--space-1-5);
   }
 
-  .form-group label {
+  .form-group label,
+  .field-label {
     font-size: var(--font-size-base);
     font-weight: var(--font-weight-medium);
     color: var(--colour-text);

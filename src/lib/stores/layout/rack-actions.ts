@@ -5,12 +5,12 @@
  * duplication, reordering, and raw mutators for undo/redo.
  */
 
-import type { FormFactor, Rack, RackGroup } from "$lib/types";
+import type { FormFactor, Rack, RackGroup, RackProfile } from "$lib/types";
 import { MAX_RACKS } from "$lib/types/constants";
 import { createDefaultRack } from "$lib/utils/serialization";
 import { layoutDebug } from "$lib/utils/debug";
 import { generateId } from "$lib/utils/device";
-import { generateRackId } from "$lib/utils/rack";
+import { filterUnchangedRackUpdates, generateRackId } from "$lib/utils/rack";
 import {
   createAddRackCommand,
   createDeleteRackCommand,
@@ -23,6 +23,8 @@ import type { LayoutStateAccess } from "./types";
 import { getRackGroupCommandAdapter, getRackGroupForRack } from "./rack-groups";
 import { setLayoutNamesRaw } from "./mutators";
 import { reorderRackRow } from "$lib/utils/rack-row";
+import { constrainRackProfileUpdates } from "$lib/utils/rack-profile";
+import { isBayedRackUpdateAllowed } from "$lib/utils/rack-bay-invariants";
 
 /** Recorded single-rack update action injected by the facade. */
 export type UpdateRackRecordedFn = (
@@ -293,6 +295,7 @@ export function addRack(
   form_factor?: FormFactor,
   desc_units?: boolean,
   starting_unit?: number,
+  profile?: RackProfile,
 ): (Rack & { id: string }) | null {
   const layout = ctx.getLayout();
 
@@ -323,6 +326,7 @@ export function addRack(
     starting_unit ?? 1,
     true, // show_rear
     generateRackId(), // id - pass directly
+    profile,
   );
 
   // Use recorded action for undo/redo support
@@ -608,35 +612,50 @@ export function updateRack(
 ): void {
   const rackIndex = ctx.findRackIndex(id);
   if (rackIndex === -1) return;
+  const rack = ctx.getLayout().racks[rackIndex]!;
+  const constrainedUpdates = constrainRackProfileUpdates(rack, updates);
+  const group = getRackGroupForRack(ctx, id);
 
-  // Check if height change on bayed rack
-  if (updates.height !== undefined) {
-    const group = getRackGroupForRack(ctx, id);
-    if (group?.layout_preset === "bayed") {
-      layoutDebug.state(
-        "updateRack: rejected height change for bayed rack %s",
-        id,
-      );
-      // Silently reject - UI should show toast
-      return;
-    }
+  // Profile identity and rail dimensions describe the whole bay. A direct
+  // member change is safe only when it strictly reduces disagreements with its
+  // peers. Explicit Generic and an omitted profile share the same physical
+  // identity, so adding the persistence marker is safe without a peer change.
+  if (
+    group?.layout_preset === "bayed" &&
+    !isBayedRackUpdateAllowed(rack, constrainedUpdates, {
+      group,
+      racks: ctx.getLayout().racks,
+    })
+  ) {
+    layoutDebug.state(
+      "updateRack: rejected per-member profile or rail change for bayed rack %s",
+      id,
+    );
+    // Silently reject - UI should show toast
+    return;
   }
 
   // Handle view separately (doesn't need undo/redo)
-  if (updates.view !== undefined) {
+  if (
+    constrainedUpdates.view !== undefined &&
+    constrainedUpdates.view !== rack.view
+  ) {
     const layout = ctx.getLayout();
     ctx.setLayout({
       ...layout,
       racks: layout.racks.map((r, i) =>
-        i === rackIndex ? { ...r, view: updates.view } : r,
+        i === rackIndex ? { ...r, view: constrainedUpdates.view } : r,
       ),
     });
     ctx.markDirty();
   }
 
   // For other properties, use recorded version for undo/redo support
-  const { view: _view, devices: _devices, ...recordableUpdates } = updates;
-  if (Object.keys(recordableUpdates).length === 0) return;
+  const {
+    view: _view,
+    devices: _devices,
+    ...candidateUpdates
+  } = constrainedUpdates;
 
   // BayedRackView renders one shared U-label column read from racks[0], so
   // all bays must agree on desc_units / starting_unit. When the change
@@ -646,22 +665,21 @@ export function updateRack(
   const numberingKeys = ["desc_units", "starting_unit"] as const;
   const numberingUpdates: Partial<Omit<Rack, "devices" | "view">> = {};
   for (const key of numberingKeys) {
-    if (key in recordableUpdates) {
-      numberingUpdates[key] = recordableUpdates[key] as never;
+    if (key in candidateUpdates) {
+      numberingUpdates[key] = candidateUpdates[key] as never;
     }
   }
 
-  const group =
+  if (
+    group?.layout_preset === "bayed" &&
+    group.rack_ids.length > 1 &&
     Object.keys(numberingUpdates).length > 0
-      ? getRackGroupForRack(ctx, id)
-      : undefined;
-
-  if (group?.layout_preset === "bayed" && group.rack_ids.length > 1) {
+  ) {
     // Origin gets the full update; peers only get the numbering keys.
     const targets: {
       rackId: string;
       updates: Partial<Omit<Rack, "devices" | "view">>;
-    }[] = [{ rackId: id, updates: recordableUpdates }];
+    }[] = [{ rackId: id, updates: candidateUpdates }];
     for (const peerId of group.rack_ids) {
       if (peerId === id) continue;
       targets.push({ rackId: peerId, updates: numberingUpdates });
@@ -669,6 +687,9 @@ export function updateRack(
     updateRacksBatchRecordedFn(targets, "Update bayed rack");
     return;
   }
+
+  const recordableUpdates = filterUnchangedRackUpdates(rack, candidateUpdates);
+  if (Object.keys(recordableUpdates).length === 0) return;
 
   updateRackRecordedFn(id, recordableUpdates);
 }

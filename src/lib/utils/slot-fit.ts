@@ -2,6 +2,7 @@ import type { DeviceType, Slot } from "$lib/types";
 
 export const SLOT_FRACTION_TOLERANCE = 0.01;
 export const SLOT_DIMENSION_TOLERANCE_MM = 0.5;
+export const RACK_UNIT_HEIGHT_MM = 44.45;
 
 export interface DeviceDimensionsMm {
   width?: number;
@@ -13,15 +14,25 @@ export interface SlotFitContext {
   rackWidth?: number;
   rackWidthMm?: number;
   containerHeightUnits?: number;
+  containerSlots?: readonly Slot[];
 }
 
 export interface SlotFitIssue {
-  code: "category" | "logical_width" | "physical_width" | "height";
+  code:
+    | "category"
+    | "logical_width"
+    | "physical_width"
+    | "height"
+    | "physical_height";
   message: string;
 }
 
 export interface SlotTopologyIssue {
-  code: "duplicate_id" | "duplicate_cell" | "row_width_overflow";
+  code:
+    | "duplicate_id"
+    | "duplicate_cell"
+    | "row_width_overflow"
+    | "height_overflow";
   message: string;
   slotId?: string;
   row?: number;
@@ -37,15 +48,23 @@ export function slotWidthFraction(slot: Slot): number {
   return slot.width_fraction ?? 1;
 }
 
-export function slotHeightUnits(slot: Slot): number {
-  return slot.height_units ?? 1;
-}
-
 export function effectiveSlotHeightUnits(
   slot: Slot,
   context: SlotFitContext = {},
 ): number {
-  return slot.height_units ?? context.containerHeightUnits ?? 1;
+  if (slot.height_units !== undefined) return slot.height_units;
+
+  const slots = context.containerSlots;
+  const containerHeight = context.containerHeightUnits;
+  if (!slots?.length || containerHeight === undefined) return 1;
+
+  // Legacy width-only carriers omit every height. Their rows divide the full
+  // container height evenly; once any height is explicit, omitted cells keep
+  // the documented 1U default instead.
+  if (slots.some((candidate) => candidate.height_units !== undefined)) return 1;
+  const rowCount = new Set(slots.map((candidate) => candidate.position.row))
+    .size;
+  return rowCount > 0 ? containerHeight / rowCount : 1;
 }
 
 export function requiredSlotFraction(device: DeviceType): number {
@@ -127,16 +146,30 @@ export function getSlotFitIssues(
     });
   }
 
+  const deviceHeightMm = getDeviceDimensionsMm(childType)?.height;
+  const availableHeightMm = slotHeight * RACK_UNIT_HEIGHT_MM;
+  if (
+    deviceHeightMm !== undefined &&
+    deviceHeightMm > availableHeightMm + SLOT_DIMENSION_TOLERANCE_MM
+  ) {
+    issues.push({
+      code: "physical_height",
+      message: `Device is ${deviceHeightMm}mm tall, taller than slot "${slot.id}" (${availableHeightMm.toFixed(1)}mm).`,
+    });
+  }
+
   return issues;
 }
 
 export function validateSlotTopology(
   slots: readonly Slot[],
+  containerHeightUnits?: number,
 ): SlotTopologyIssue[] {
   const issues: SlotTopologyIssue[] = [];
   const ids = new Set<string>();
   const cells = new Map<string, string>();
   const rowWidths = new Map<number, number>();
+  const rowHeights = new Map<number, number>();
 
   for (const slot of slots) {
     if (ids.has(slot.id)) {
@@ -166,6 +199,16 @@ export function validateSlotTopology(
       slot.position.row,
       (rowWidths.get(slot.position.row) ?? 0) + slotWidthFraction(slot),
     );
+    rowHeights.set(
+      slot.position.row,
+      Math.max(
+        rowHeights.get(slot.position.row) ?? 0,
+        effectiveSlotHeightUnits(slot, {
+          containerHeightUnits,
+          containerSlots: slots,
+        }),
+      ),
+    );
   }
 
   for (const [row, width] of rowWidths) {
@@ -174,6 +217,19 @@ export function validateSlotTopology(
         code: "row_width_overflow",
         row,
         message: `Slot row ${row} uses ${width.toFixed(2)} rack-width fraction, exceeding 1.00.`,
+      });
+    }
+  }
+
+  if (containerHeightUnits !== undefined) {
+    const totalHeight = [...rowHeights.values()].reduce(
+      (sum, height) => sum + height,
+      0,
+    );
+    if (totalHeight > containerHeightUnits + SLOT_FRACTION_TOLERANCE) {
+      issues.push({
+        code: "height_overflow",
+        message: `Slot rows use ${totalHeight.toFixed(2)}U, exceeding the container height of ${containerHeightUnits}U.`,
       });
     }
   }

@@ -23,6 +23,7 @@
   import { getMinResizeHeight, snapResizeHeight } from "$lib/utils/rack-resize";
   import { U_HEIGHT_PX, getRackWidth } from "$lib/constants/layout";
   import { MAX_RACK_HEIGHT } from "$lib/types/constants";
+  import { isRackMateT1Plus } from "$lib/utils/rack-profile";
 
   interface Props {
     partyMode?: boolean;
@@ -170,6 +171,13 @@
     return target.kind === "rack" ? [target.rackId] : target.rackIds;
   }
 
+  function resizeTargetHasFixedProfile(target: ResizeTarget): boolean {
+    return resizeTargetRackIds(target).some((id) => {
+      const rack = layoutStore.getRackById(id);
+      return isRackMateT1Plus(rack);
+    });
+  }
+
   // The lowest height the target can shrink to without clipping any device:
   // the highest floor across every rack the target mutates.
   function resizeTargetMinHeight(rackIds: string[]): number {
@@ -186,6 +194,7 @@
   // Commit a settled height to the target as a single recorded step: a standalone
   // rack updates directly; a bay updates every member together.
   function commitResizeHeight(target: ResizeTarget, height: number) {
+    if (resizeTargetHasFixedProfile(target)) return;
     if (target.kind === "rack") {
       layoutStore.updateRack(target.rackId, { height });
     } else {
@@ -225,6 +234,7 @@
     grip: ResizeGrip,
     event: PointerEvent,
   ) {
+    if (resizeTargetHasFixedProfile(target)) return;
     const rackIds = resizeTargetRackIds(target);
     const firstRackId = rackIds[0];
     if (!firstRackId) return;
@@ -321,6 +331,7 @@
     if (event.key === "ArrowUp") delta = 1;
     else if (event.key === "ArrowDown") delta = -1;
     else return;
+    if (resizeTargetHasFixedProfile(target)) return;
     const rackIds = resizeTargetRackIds(target);
     const firstRackId = rackIds[0];
     if (!firstRackId) return;
@@ -556,13 +567,22 @@
   ) {
     const { sourceRackId, sourceIndex, targetRackId, targetPosition, face } =
       event.detail;
-    layoutStore.moveDeviceToRack(
+    const moved = layoutStore.moveDeviceToRack(
       sourceRackId,
       sourceIndex,
       targetRackId,
       targetPosition,
       face,
     );
+    if (!moved) {
+      hapticError();
+      toastStore.showToast(
+        "Device assembly doesn't fit this rack",
+        "warning",
+        3000,
+      );
+      return;
+    }
     ondevicemoverack?.(event);
   }
 </script>
@@ -616,7 +636,7 @@
         <div
           class="rack-wrapper"
           class:active={isActive}
-          class:resizable={isSelected}
+          class:resizable={isSelected && !isRackMateT1Plus(rack)}
           style:transform={resizeDrag?.target.kind === "rack" &&
           resizeDrag.target.rackId === rack.id &&
           resizeDrag.grip === "bottom"
@@ -653,7 +673,7 @@
             onduplicate={() => onrackduplicate?.(rack.id)}
             ondelete={() => onrackdelete?.(rack.id)}
           />
-          {#if isSelected}
+          {#if isSelected && !isRackMateT1Plus(rack)}
             {@render resizeGrip(
               { kind: "rack", rackId: rack.id },
               "top",
@@ -759,7 +779,7 @@
             onbaydragend={handleBayDragEnd}
             onbaydragcancel={handleBayDragCancel}
           />
-          {#if isBaySelected && uiStore.enableBayedRacks}
+          {#if isBaySelected && uiStore.enableBayedRacks && !item.racks.some(isRackMateT1Plus)}
             <!-- One bay-level handle (AC6). It lives on the top edge: the bay is
                  bottom-anchored in the row, so a top grip grows upward to match
                  the drag with no preview transform. A bottom grip cannot: the

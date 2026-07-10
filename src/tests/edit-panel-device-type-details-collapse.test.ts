@@ -121,4 +121,35 @@ describe("EditPanel Device type details collapse (#2443)", () => {
     expect(getDetailsToggle()).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Brand")).toBeInTheDocument();
   });
+
+  it("keeps a critical rack-fit warning visible while details are collapsed", () => {
+    const layoutStore = getLayoutStore();
+    const selectionStore = getSelectionStore();
+    const rack = layoutStore.addRack("RackMate", 8, 10)!;
+    const deviceType = layoutStore.addDeviceType(
+      createTestDeviceTypeInput({
+        name: "Unverified Device",
+        rack_widths: [10],
+      }),
+    );
+    layoutStore.updateDeviceType(deviceType.slug, {
+      custom_fields: {
+        rackula_fit: {
+          status: "needs_measurement",
+          open_checks: ["measure rear cable clearance"],
+        },
+      },
+    });
+    expect(layoutStore.placeDevice(rack.id, deviceType.slug, 1, "front")).toBe(
+      true,
+    );
+    selectionStore.selectDevice(rack.id, layoutStore.rack!.devices[0]!.id);
+
+    renderEditTab();
+
+    expect(getDetailsToggle()).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.getByRole("status", { name: "Rack fit warning" }),
+    ).toHaveTextContent("measure rear cable clearance");
+  });
 });

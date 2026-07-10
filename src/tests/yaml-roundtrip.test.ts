@@ -14,6 +14,73 @@ import {
 } from "./factories";
 
 describe("YAML layout round-trip", () => {
+  it("preserves an explicit RackMate T1 Plus profile", async () => {
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          width: 10,
+          height: 8,
+          depth_mm: 260,
+          profile: "rackmate-t1-plus",
+        }),
+      ],
+    });
+
+    const yaml = await serializeLayoutToYaml(layout);
+    const restored = await parseLayoutYaml(yaml);
+
+    expect(yaml).toContain("profile: rackmate-t1-plus");
+    expect(restored.racks[0]?.profile).toBe("rackmate-t1-plus");
+    expect(restored.racks[0]?.height).toBe(8);
+    expect(restored.racks[0]?.depth_mm).toBe(260);
+  });
+
+  it("preserves an explicit Generic opt-out without renaming the rack", async () => {
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          name: "RackMate T1 Plus",
+          width: 10,
+          height: 8,
+          depth_mm: 260,
+          profile: "generic",
+        }),
+      ],
+    });
+
+    const yaml = await serializeLayoutToYaml(layout);
+    const restored = await parseLayoutYaml(yaml);
+
+    expect(yaml).toContain("profile: generic");
+    expect(restored.racks[0]).toMatchObject({
+      name: "RackMate T1 Plus",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+      profile: "generic",
+    });
+  });
+
+  it("stamps Generic when serializing an unmarked exact legacy tuple", async () => {
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          name: "RackMate T1 Plus",
+          width: 10,
+          height: 8,
+          depth_mm: 260,
+          profile: undefined,
+        }),
+      ],
+    });
+
+    const yaml = await serializeLayoutToYaml(layout);
+    const restored = await parseLayoutYaml(yaml);
+
+    expect(yaml).toContain("profile: generic");
+    expect(restored.racks[0]?.profile).toBe("generic");
+  });
+
   it("preserves rack_widths for 10-inch device compatibility", async () => {
     const tenInchDevice = createTestDeviceType({
       slug: "deskpi-ten-inch-device",
@@ -35,6 +102,45 @@ describe("YAML layout round-trip", () => {
       (dt) => dt.slug === tenInchDevice.slug,
     );
     expect(restoredType?.rack_widths).toEqual([10]);
+  });
+
+  it("preserves an explicit device type that shadows a built-in slug", async () => {
+    const shadow = createTestDeviceType({
+      slug: "ubiquiti-unifi-cloud-gateway-max",
+      model: "Custom Shadow Gateway",
+      u_height: 1,
+      rack_widths: [19],
+      is_full_depth: true,
+    });
+    shadow.custom_fields = {
+      owner: "local",
+      rackula_fit: {
+        dimensions_mm: { width: 440, depth: 300, height: 44 },
+      },
+    };
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          id: "rack-1",
+          width: 19,
+          devices: [
+            createTestDevice({
+              id: "shadow-1",
+              device_type: shadow.slug,
+              position: 6,
+            }),
+          ],
+        }),
+      ],
+      device_types: [shadow],
+    });
+
+    const restored = await parseLayoutYaml(await serializeLayoutToYaml(layout));
+    const restoredType = restored.device_types.find(
+      (deviceType) => deviceType.slug === shadow.slug,
+    );
+
+    expect(restoredType).toEqual(shadow);
   });
 
   it("preserves auto_created for an auto-synthesized carrier placement", async () => {
@@ -255,7 +361,18 @@ describe("YAML editor schema hint (#2230)", () => {
   it("prepends the hint on the folder-ZIP metadata export path too", async () => {
     // The .rackula.yaml inside a folder ZIP is an editor-openable export, so it
     // carries the same hint.
-    const yaml = await serializeLayoutToYamlWithMetadata(createTestLayout(), {
+    const layout = createTestLayout({
+      racks: [
+        createTestRack({
+          name: "RackMate T1 Plus",
+          width: 10,
+          height: 8,
+          depth_mm: 260,
+          profile: undefined,
+        }),
+      ],
+    });
+    const yaml = await serializeLayoutToYamlWithMetadata(layout, {
       id: "33333333-3333-4333-8333-333333333333",
       name: "Archive Lab",
       schema_version: "1.0",
@@ -264,10 +381,12 @@ describe("YAML editor schema hint (#2230)", () => {
     const expected = `${HINT_PREFIX}https://count.racku.la/schemas/rackula-layout.schema.json`;
 
     expect(firstLine === expected).toBe(true);
+    expect(yaml).toContain("profile: generic");
 
     // And the file still parses (the comment is ignored on read).
     const restored = await parseLayoutYaml(yaml);
     expect(restored.name).toBeTruthy();
+    expect(restored.racks[0]?.profile).toBe("generic");
   });
 });
 

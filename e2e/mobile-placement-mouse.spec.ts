@@ -25,7 +25,7 @@ import { openDeviceLibraryFromBottomNav } from "./helpers/mobile-navigation";
 import {
   EMPTY_RACK_SHARE,
   gotoWithRack,
-  paletteItemByName,
+  paletteSelectButtonByName,
   locators,
 } from "./helpers";
 
@@ -54,7 +54,7 @@ test.describe("Mobile tap-to-place with a mouse (#1757)", () => {
     // this starts placement mode and auto-closes the bottom sheet (do NOT press
     // Escape, it would cancel placement).
     await openDeviceLibraryFromBottomNav(page);
-    const serverDevice = paletteItemByName(page, "Server").first();
+    const serverDevice = paletteSelectButtonByName(page, "Server").first();
     await expect(serverDevice).toBeVisible();
     await serverDevice.click();
 

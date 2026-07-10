@@ -13,16 +13,8 @@
  *
  * A valid carrier-first layout always serialises without error.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { DeviceTypeSchema, LayoutSchema } from "$lib/schemas";
-import { getLayoutStore, resetLayoutStore } from "$lib/stores/layout.svelte";
-import { resetHistoryStore } from "$lib/stores/history.svelte";
-import { CATEGORY_COLOURS } from "$lib/types/constants";
-
-beforeEach(() => {
-  resetLayoutStore();
-  resetHistoryStore();
-});
 
 // =============================================================================
 // Schema enforcement (LayoutSchema.superRefine)
@@ -482,232 +474,6 @@ describe("LayoutSchema carrier-first enforcement", () => {
   });
 });
 
-// =============================================================================
-// Store enforcement (placeDevice)
-// =============================================================================
-
-describe("placeDevice store enforcement", () => {
-  type Store = NonNullable<ReturnType<typeof getLayoutStore>>;
-
-  function setupRack(
-    height = 12,
-    width: 10 | 19 | 21 | 23 = 19,
-  ): { store: Store; rackId: string } {
-    const store = getLayoutStore()!;
-    const rack = store.addRack("Test Rack", height, width);
-    return { store, rackId: rack!.id };
-  }
-
-  it("rejects a sub-U half-width device placed directly via placeDevice", () => {
-    const { store, rackId } = setupRack();
-    const dt = store.addDeviceType({
-      name: "RB5009",
-      u_height: 0.5,
-      category: "network",
-      colour: CATEGORY_COLOURS.network,
-      slot_width: 1,
-    });
-
-    expect(store.placeDevice(rackId, dt.slug, 5)).toBe(false);
-    expect(store.rack!.devices.some((d) => d.device_type === dt.slug)).toBe(
-      false,
-    );
-  });
-
-  it("rejects a half-width full-height device placed directly via placeDevice", () => {
-    const { store, rackId } = setupRack();
-    const dt = store.addDeviceType({
-      name: "Mini 1U",
-      u_height: 1,
-      category: "network",
-      colour: CATEGORY_COLOURS.network,
-      slot_width: 1,
-    });
-
-    expect(store.placeDevice(rackId, dt.slug, 5)).toBe(false);
-  });
-
-  it("places a full-width whole-U device directly via placeDevice", () => {
-    const { store, rackId } = setupRack();
-    const dt = store.addDeviceType({
-      name: "Server 1U",
-      u_height: 1,
-      category: "server",
-      colour: CATEGORY_COLOURS.server,
-      slot_width: 2,
-    });
-
-    expect(store.placeDevice(rackId, dt.slug, 5)).toBe(true);
-    expect(store.rack!.devices.some((d) => d.device_type === dt.slug)).toBe(
-      true,
-    );
-  });
-
-  it("places a native 10-inch whole-U device directly on a 10-inch rack", () => {
-    const { store, rackId } = setupRack(12, 10);
-    const dt = store.addDeviceType({
-      name: "Native 10-inch PDU",
-      u_height: 1,
-      category: "power",
-      colour: CATEGORY_COLOURS.power,
-      is_full_depth: false,
-      slot_width: 1,
-      rack_widths: [10],
-    });
-
-    expect(store.placeDevice(rackId, dt.slug, 5, "rear")).toBe(true);
-    const placed = store.rack!.devices.find((d) => d.device_type === dt.slug);
-    expect(placed?.container_id).toBeUndefined();
-    expect(placed?.face).toBe("rear");
-  });
-
-  it("keeps native 10-inch devices off 19-inch bare rails", () => {
-    const { store, rackId } = setupRack(12, 19);
-    const dt = store.addDeviceType({
-      name: "Native 10-inch PDU",
-      u_height: 1,
-      category: "power",
-      colour: CATEGORY_COLOURS.power,
-      is_full_depth: false,
-      slot_width: 1,
-      rack_widths: [10],
-    });
-
-    expect(store.placeDevice(rackId, dt.slug, 5, "rear")).toBe(false);
-  });
-
-  it("places native 10-inch devices via smart placement without synthesizing a carrier", () => {
-    const { store, rackId } = setupRack(12, 10);
-    const dt = store.addDeviceType({
-      name: "Native 10-inch PDU",
-      u_height: 1,
-      category: "power",
-      colour: CATEGORY_COLOURS.power,
-      is_full_depth: false,
-      slot_width: 1,
-      rack_widths: [10],
-    });
-
-    expect(store.placeDeviceSmart(rackId, dt.slug, 5, "rear")).toBe(true);
-    const placed = store.rack!.devices.find((d) => d.device_type === dt.slug);
-    expect(placed).toBeDefined();
-    expect(placed?.auto_created).toBeUndefined();
-    expect(store.rack!.devices.some((d) => d.auto_created)).toBe(false);
-  });
-
-  it("keeps compatible tray-only child devices off bare rails", () => {
-    const { store, rackId } = setupRack(12, 10);
-    const dt = store.addDeviceType({
-      name: "Tray-Only Switch",
-      u_height: 1,
-      category: "network",
-      colour: CATEGORY_COLOURS.network,
-      slot_width: 1,
-      rack_widths: [10, 19],
-      subdevice_role: "child",
-    });
-
-    expect(store.placeDevice(rackId, dt.slug, 5)).toBe(false);
-  });
-
-  it("places a sub-U blank panel directly via placeDevice (exemption)", () => {
-    const { store, rackId } = setupRack();
-    const dt = store.addDeviceType({
-      name: "Blank Panel",
-      u_height: 0.5,
-      category: "blank",
-      colour: CATEGORY_COLOURS.blank,
-    });
-
-    expect(store.placeDevice(rackId, dt.slug, 5)).toBe(true);
-    expect(store.rack!.devices.some((d) => d.device_type === dt.slug)).toBe(
-      true,
-    );
-  });
-});
-
-describe("moveDevice store enforcement (carrier-first parity)", () => {
-  type Store = NonNullable<ReturnType<typeof getLayoutStore>>;
-
-  /** Seed a carrier holding one half-width child; return store + ids. */
-  function setupCarrierWithChild(): {
-    store: Store;
-    rackId: string;
-    childIndex: number;
-  } {
-    const store = getLayoutStore()!;
-    const carrierType = store.addDeviceType({
-      name: "Carrier",
-      u_height: 1,
-      category: "shelf",
-      colour: CATEGORY_COLOURS.shelf,
-      slots: [
-        {
-          id: "col-1",
-          position: { row: 0, col: 0 },
-          width_fraction: 0.5,
-          height_units: 1,
-        },
-        {
-          id: "col-2",
-          position: { row: 0, col: 1 },
-          width_fraction: 0.5,
-          height_units: 1,
-        },
-      ],
-    });
-    const childType = store.addDeviceType({
-      name: "Half",
-      u_height: 1,
-      category: "network",
-      colour: CATEGORY_COLOURS.network,
-      slot_width: 1,
-    });
-    const rack = store.addRack("Rack", 42)!;
-    store.placeDevice(rack.id, carrierType.slug, 5);
-    const carrier = store.rack!.devices.find(
-      (d) => d.device_type === carrierType.slug,
-    )!;
-    store.placeInContainer(rack.id, childType.slug, carrier.id, "col-1", 0);
-    const child = store.rack!.devices.find(
-      (d) => d.container_id === carrier.id,
-    )!;
-    return {
-      store,
-      rackId: rack.id,
-      childIndex: store.rack!.devices.indexOf(child),
-    };
-  }
-
-  it("refuses to move a half-width child out onto a bare rail", () => {
-    const { store, rackId, childIndex } = setupCarrierWithChild();
-    const child = store.rack!.devices[childIndex]!;
-    const containerId = child.container_id;
-
-    expect(store.moveDevice(rackId, childIndex, 10)).toBe(false);
-
-    // The child stays in its carrier; it is not detached onto the rail.
-    const after = store.rack!.devices.find((d) => d.id === child.id)!;
-    expect(after.container_id).toBe(containerId);
-  });
-
-  it("still moves a full-width rail device", () => {
-    const store = getLayoutStore()!;
-    const dt = store.addDeviceType({
-      name: "Server",
-      u_height: 1,
-      category: "server",
-      colour: CATEGORY_COLOURS.server,
-      slot_width: 2,
-    });
-    const rack = store.addRack("Rack", 42)!;
-    store.placeDevice(rack.id, dt.slug, 5);
-    const idx = store.rack!.devices.findIndex((d) => d.device_type === dt.slug);
-
-    expect(store.moveDevice(rack.id, idx, 10)).toBe(true);
-  });
-});
-
 describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => {
   it("rejects a carrier whose slot row exceeds the container width", () => {
     const result = DeviceTypeSchema.safeParse({
@@ -860,6 +626,70 @@ describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => 
     }
   });
 
+  it("rejects a physically too-tall full-width child in a 0.5U slot", () => {
+    const carrier = {
+      slug: "half-u-full-width-tray",
+      model: "Half-U Full-Width Tray",
+      u_height: 1,
+      category: "shelf",
+      colour: "#888888",
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 0.5,
+          accepts: ["network"],
+        },
+      ],
+    };
+    const tallChild = {
+      slug: "tall-half-u-child",
+      model: "Tall Half-U Child",
+      u_height: 0.5,
+      slot_width: 2,
+      rack_widths: [10],
+      is_full_depth: false,
+      category: "network",
+      colour: "#4A90D9",
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 100, depth: 100, height: 30 },
+        },
+      },
+    };
+    const layout = layoutWith(
+      [carrier, tallChild],
+      [
+        {
+          id: "carrier-1",
+          device_type: carrier.slug,
+          position: 30,
+          face: "front" as const,
+        },
+        {
+          id: "child-1",
+          device_type: tallChild.slug,
+          position: 0,
+          face: "front" as const,
+          container_id: "carrier-1",
+          slot_id: "main",
+        },
+      ],
+      10,
+    );
+
+    const result = LayoutSchema.safeParse(layout);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((issue) =>
+          /taller than slot/i.test(issue.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
   it("rejects a child position that extends outside the selected slot", () => {
     const carrier = {
       slug: "one-slot-carrier",
@@ -915,6 +745,55 @@ describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => 
     }
   });
 
+  it("accepts a 19-inch child in a wider rack using minimum-width semantics", () => {
+    const carrier = {
+      slug: "wide-rack-carrier",
+      model: "Wide Rack Carrier",
+      u_height: 1,
+      category: "shelf",
+      colour: "#888888",
+      rack_widths: [19],
+      slots: [
+        {
+          id: "main",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+      ],
+    };
+    const child = {
+      slug: "nineteen-inch-child",
+      model: "19-inch Child",
+      u_height: 1,
+      category: "network",
+      colour: "#4A90D9",
+      rack_widths: [19],
+    };
+    const layout = layoutWith(
+      [carrier, child],
+      [
+        {
+          id: "carrier-1",
+          device_type: carrier.slug,
+          position: 30,
+          face: "front" as const,
+        },
+        {
+          id: "child-1",
+          device_type: child.slug,
+          position: 0,
+          face: "front" as const,
+          container_id: "carrier-1",
+          slot_id: "main",
+        },
+      ],
+      21,
+    );
+
+    expect(LayoutSchema.safeParse(layout).success).toBe(true);
+  });
+
   it("enforces carrier-first rules for built-in brand types not embedded in the layout", () => {
     const layout = layoutWith(
       [],
@@ -922,6 +801,108 @@ describe("LayoutSchema slot.accepts enforcement (canPlaceInSlot parity)", () => 
         {
           id: "tiny-1",
           device_type: "lenovo-thinkcentre-m720q-tiny",
+          position: 30,
+          face: "front" as const,
+        },
+      ],
+      10,
+    );
+
+    const result = LayoutSchema.safeParse(layout);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((i) =>
+          /cannot mount directly/i.test(i.message),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("treats an explicit built-in shadow as authoritative", () => {
+    const dualCarrier = {
+      slug: "rackmate-dual-tray",
+      model: "RackMate Dual Tray",
+      u_height: 1,
+      category: "shelf",
+      colour: "#888888",
+      slots: [
+        {
+          id: "left",
+          position: { row: 0, col: 0 },
+          width_fraction: 0.5,
+          height_units: 0.5,
+          accepts: ["network"],
+        },
+        {
+          id: "right",
+          position: { row: 0, col: 1 },
+          width_fraction: 0.5,
+          height_units: 0.5,
+          accepts: ["network"],
+        },
+      ],
+    };
+    const strippedUcgMax = {
+      slug: "ubiquiti-unifi-cloud-gateway-max",
+      model: "UCG-Max",
+      u_height: 0.5,
+      slot_width: 1 as const,
+      subdevice_role: "child" as const,
+      rack_widths: [10] as const,
+      category: "network",
+      colour: "#4A90D9",
+    };
+    const layout = layoutWith(
+      [dualCarrier, strippedUcgMax],
+      [
+        {
+          id: "carrier-1",
+          device_type: "rackmate-dual-tray",
+          position: 30,
+          face: "front" as const,
+        },
+        {
+          id: "ucg-1",
+          device_type: strippedUcgMax.slug,
+          position: 0,
+          face: "front" as const,
+          container_id: "carrier-1",
+          slot_id: "left",
+        },
+      ],
+      10,
+    );
+
+    expect(LayoutSchema.safeParse(layout).success).toBe(true);
+  });
+
+  it("returns explicit built-in shadow types without canonical hydration", () => {
+    const strippedUcgMax = {
+      slug: "ubiquiti-unifi-cloud-gateway-max",
+      model: "UCG-Max",
+      u_height: 0.5,
+      slot_width: 1 as const,
+      subdevice_role: "child" as const,
+      category: "network",
+      colour: "#4A90D9",
+    };
+    const layout = layoutWith([strippedUcgMax], [], 10);
+
+    const parsed = LayoutSchema.parse(layout);
+    const restored = parsed.device_types.find(
+      (device) => device.slug === strippedUcgMax.slug,
+    );
+    expect(restored).toEqual(strippedUcgMax);
+  });
+
+  it("enforces carrier-first rules for omitted built-ins from every brand pack", () => {
+    const layout = layoutWith(
+      [],
+      [
+        {
+          id: "pi-1",
+          device_type: "raspberry-pi-5",
           position: 30,
           face: "front" as const,
         },

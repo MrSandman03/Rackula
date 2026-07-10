@@ -94,7 +94,7 @@ function _moveSelectedDevice(direction: 1 | -1): void {
  * the slot verb's run path and its enabled predicate so the control only shows
  * when activating it would actually move the device.
  */
-function nextSlotForSelectedDevice(
+function nextSlotForDevice(
   rack: Rack,
   deviceTypes: DeviceType[],
   deviceIndex: number,
@@ -119,7 +119,17 @@ function nextSlotForSelectedDevice(
     childType,
     child.slot_id,
     siblings,
+    { rackWidth: rack.width },
   );
+}
+
+/** Whether a contained device can move to another fitting cell in its carrier. */
+export function canMoveDeviceToNextSlot(
+  rack: Rack,
+  deviceTypes: DeviceType[],
+  deviceIndex: number,
+): boolean {
+  return nextSlotForDevice(rack, deviceTypes, deviceIndex) !== null;
 }
 
 /**
@@ -140,10 +150,25 @@ export function canMoveSelectedDeviceSlot(): boolean {
   const deviceIndex = selectionStore.getSelectedDeviceIndex(rack.devices);
   if (deviceIndex === null) return false;
 
-  return (
-    nextSlotForSelectedDevice(rack, layoutStore.device_types, deviceIndex) !==
-    null
-  );
+  return canMoveDeviceToNextSlot(rack, layoutStore.device_types, deviceIndex);
+}
+
+/** Whether the live device selection is mounted inside a carrier. */
+export function isSelectedDeviceContainerChild(): boolean {
+  const selectionStore = getSelectionStore();
+  const layoutStore = getLayoutStore();
+
+  if (!selectionStore.isDeviceSelected) return false;
+  if (selectionStore.selectedRackId === null) return false;
+
+  const rack = layoutStore.getRackById(selectionStore.selectedRackId);
+  if (!rack) return false;
+
+  const deviceIndex = selectionStore.getSelectedDeviceIndex(rack.devices);
+  if (deviceIndex === null) return false;
+
+  const selectedDevice = rack.devices[deviceIndex];
+  return selectedDevice ? isContainerChild(selectedDevice) : false;
 }
 
 /**

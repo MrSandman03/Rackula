@@ -73,9 +73,10 @@ test.describe("Shelf Category", () => {
     await expect(placedDevice).toBeVisible({ timeout: 5000 });
 
     // Assert the placed device is actually a shelf, not merely that some fill is
-    // set. The rack device's accessible name carries its category in the form
+    // set. The interactive device surface carries its category in the form
     // "<name>, <n>U <category> at U<pos>", so a shelf announces "... U shelf ...".
-    await expect(placedDevice).toHaveAttribute(
+    const placedDeviceButton = placedDevice.getByRole("button");
+    await expect(placedDeviceButton).toHaveAttribute(
       "aria-label",
       /,\s*\d+U shelf\b/i,
     );

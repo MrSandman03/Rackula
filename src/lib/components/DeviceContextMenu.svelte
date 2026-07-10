@@ -27,8 +27,12 @@
     onmovedown?: () => void;
     /** Flip device face callback */
     onflip?: () => void;
+    /** Move a contained device to the next available carrier cell */
+    onmoveslot?: () => void;
     /** Delete device callback */
     ondelete?: () => void;
+    /** Whether the target is mounted inside a carrier */
+    containerChild?: boolean;
     /** Whether move up is available */
     canMoveUp?: boolean;
     /** Whether move down is available */
@@ -58,7 +62,9 @@
     onmoveup,
     onmovedown,
     onflip,
+    onmoveslot,
     ondelete,
+    containerChild = false,
     canMoveUp = true,
     canMoveDown = true,
     children,
@@ -119,44 +125,56 @@
         <span class="context-menu-label">Edit</span>
       </ContextMenu.Item>
 
-      <ContextMenu.Item
-        class="context-menu-item"
-        data-testid="ctx-menu-item"
-        onSelect={handleSelect(onduplicate)}
-      >
-        <span class="context-menu-label">Duplicate</span>
-        <span class="context-menu-shortcut">Ctrl+D</span>
-      </ContextMenu.Item>
+      {#if containerChild}
+        {#if onmoveslot}
+          <ContextMenu.Item
+            class="context-menu-item"
+            data-testid="ctx-menu-move-slot"
+            onSelect={handleSelect(onmoveslot)}
+          >
+            <span class="context-menu-label">Move to next cell</span>
+          </ContextMenu.Item>
+        {/if}
+      {:else}
+        <ContextMenu.Item
+          class="context-menu-item"
+          data-testid="ctx-menu-item"
+          onSelect={handleSelect(onduplicate)}
+        >
+          <span class="context-menu-label">Duplicate</span>
+          <span class="context-menu-shortcut">Ctrl+D</span>
+        </ContextMenu.Item>
 
-      <ContextMenu.Separator class="context-menu-separator" />
+        <ContextMenu.Separator class="context-menu-separator" />
 
-      <ContextMenu.Item
-        class="context-menu-item"
-        data-testid="ctx-menu-item"
-        disabled={!canMoveUp}
-        onSelect={handleSelect(onmoveup)}
-      >
-        <span class="context-menu-label">Move Up</span>
-        <span class="context-menu-shortcut">&uarr;</span>
-      </ContextMenu.Item>
+        <ContextMenu.Item
+          class="context-menu-item"
+          data-testid="ctx-menu-item"
+          disabled={!canMoveUp}
+          onSelect={handleSelect(onmoveup)}
+        >
+          <span class="context-menu-label">Move Up</span>
+          <span class="context-menu-shortcut">&uarr;</span>
+        </ContextMenu.Item>
 
-      <ContextMenu.Item
-        class="context-menu-item"
-        data-testid="ctx-menu-item"
-        disabled={!canMoveDown}
-        onSelect={handleSelect(onmovedown)}
-      >
-        <span class="context-menu-label">Move Down</span>
-        <span class="context-menu-shortcut">&darr;</span>
-      </ContextMenu.Item>
+        <ContextMenu.Item
+          class="context-menu-item"
+          data-testid="ctx-menu-item"
+          disabled={!canMoveDown}
+          onSelect={handleSelect(onmovedown)}
+        >
+          <span class="context-menu-label">Move Down</span>
+          <span class="context-menu-shortcut">&darr;</span>
+        </ContextMenu.Item>
 
-      <ContextMenu.Item
-        class="context-menu-item"
-        data-testid="ctx-menu-item"
-        onSelect={handleSelect(onflip)}
-      >
-        <span class="context-menu-label">Flip face</span>
-      </ContextMenu.Item>
+        <ContextMenu.Item
+          class="context-menu-item"
+          data-testid="ctx-menu-item"
+          onSelect={handleSelect(onflip)}
+        >
+          <span class="context-menu-label">Flip face</span>
+        </ContextMenu.Item>
+      {/if}
 
       <ContextMenu.Separator class="context-menu-separator" />
 

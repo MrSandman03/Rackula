@@ -16,9 +16,11 @@ import {
 import type { LayoutStateAccess } from "./types";
 import { getCommandStoreAdapter } from "./command-adapters";
 import { getTargetRack, getRackById } from "./rack-actions";
+import { constrainRackProfileUpdates } from "$lib/utils/rack-profile";
+import { filterUnchangedRackUpdates } from "$lib/utils/rack";
 
 /**
- * Bind a command to a specific rack. The raw mutators behind rack commands
+ * Bind a command to a specific rack. The history mutators behind rack commands
  * operate on whichever rack is active, so execute/undo must activate the
  * target rack first and restore the previously active rack afterwards.
  * Mirrors what createCrossRackMoveCommand does with getActiveRackId() so
@@ -68,9 +70,15 @@ export function updateRackRecorded(
   const targetRack = getRackById(ctx, rackId);
   if (!targetRack) return;
 
+  const constrainedUpdates = filterUnchangedRackUpdates(
+    targetRack,
+    constrainRackProfileUpdates(targetRack, updates),
+  );
+  if (Object.keys(constrainedUpdates).length === 0) return;
+
   // Capture before state
   const before: Partial<Omit<Rack, "devices" | "view">> = {};
-  for (const key of Object.keys(updates) as (keyof Omit<
+  for (const key of Object.keys(constrainedUpdates) as (keyof Omit<
     Rack,
     "devices" | "view"
   >)[]) {
@@ -83,7 +91,7 @@ export function updateRackRecorded(
   const command = bindCommandToRack(
     ctx,
     rackId,
-    createUpdateRackCommand(before, updates, adapter),
+    createUpdateRackCommand(before, constrainedUpdates, adapter),
   );
   history.execute(command);
   ctx.markDirty();
@@ -112,29 +120,28 @@ export function updateRacksBatchRecorded(
   for (const { rackId, updates } of targets) {
     const targetRack = getRackById(ctx, rackId);
     if (!targetRack) continue;
+    const constrainedUpdates = filterUnchangedRackUpdates(
+      targetRack,
+      constrainRackProfileUpdates(targetRack, updates),
+    );
+    if (Object.keys(constrainedUpdates).length === 0) continue;
 
     const before: Partial<Omit<Rack, "devices" | "view">> = {};
-    let differs = false;
-    for (const key of Object.keys(updates) as (keyof Omit<
+    for (const key of Object.keys(constrainedUpdates) as (keyof Omit<
       Rack,
       "devices" | "view"
     >)[]) {
       const current = targetRack[key];
-      const next = updates[key];
-      if (current !== next) {
-        differs = true;
-      }
       before[key] = current as never;
     }
-    if (!differs) continue;
 
-    // Each sub-command activates its target rack because updateRackRaw
-    // targets whichever rack is active, then restores the previous one.
+    // Each sub-command activates its target rack because history replay targets
+    // whichever rack is active, then restores the previous one.
     commands.push({
       ...bindCommandToRack(
         ctx,
         rackId,
-        createUpdateRackCommand(before, updates, adapter),
+        createUpdateRackCommand(before, constrainedUpdates, adapter),
       ),
       description,
     });

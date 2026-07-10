@@ -8,6 +8,24 @@ import {
 } from "./factories";
 
 describe("Empty-face hint", () => {
+  it("uses a compact hint that stays inside a 10-inch rack face", () => {
+    const rack = createTestRack({ width: 10, devices: [] });
+
+    render(Rack, {
+      props: {
+        rack,
+        deviceLibrary: [],
+        selected: false,
+        faceFilter: "front",
+      },
+    });
+
+    expect(screen.getByText("Front empty")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/no front-facing or full-depth devices/i),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a hint when no devices face the rear", () => {
     // A half-depth front-only device: nothing is on the rear.
     const deviceType = createTestDeviceType({

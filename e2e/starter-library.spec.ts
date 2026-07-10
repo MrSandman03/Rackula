@@ -235,16 +235,18 @@ test.describe("Starter Library", () => {
     const total = await results.count();
     expect(total).toBeGreaterThan(0);
 
-    // Relevance: every result relates to the query. Palette item accessible
-    // names follow "${model}, ${u_height}U, ${category}", so a result is
-    // relevant if its name mentions "switch" or it is in the network category.
-    // Asserting "relevant count == total count" catches a relevance regression
-    // (e.g. a Server leaking in) without naming any specific device, so adding
-    // or renaming a device does not break this test.
-    const relevant = page.getByRole("listitem", {
-      name: /(switch|,\s*network\b)/i,
-    });
-    expect(await relevant.count()).toBe(total);
+    // Search also indexes tags and aliases that are intentionally not repeated
+    // in the visible row name. Prove a direct name match is included and an
+    // unrelated server is excluded without rejecting legitimate hidden-field
+    // matches such as switched power hardware.
+    await expect(
+      results.filter({
+        has: page.getByText("Switch (24-Port)", { exact: true }),
+      }),
+    ).toBeVisible();
+    await expect(
+      results.filter({ has: page.getByText("Server", { exact: true }) }),
+    ).toHaveCount(0);
   });
 
   test("can search for cable management devices", async ({ page }) => {

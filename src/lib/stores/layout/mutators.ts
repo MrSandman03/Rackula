@@ -20,6 +20,11 @@ import type {
 import { layoutDebug } from "$lib/utils/debug";
 import { generateId } from "$lib/utils/device";
 import { sanitizeFilename } from "$lib/utils/imageUpload";
+import {
+  constrainRackProfileUpdates,
+  isRackMateT1Plus,
+  withRackProfileDefaults,
+} from "$lib/utils/rack-profile";
 import type { LayoutStateAccess } from "./types";
 import { getTargetRack } from "./rack-actions";
 
@@ -507,8 +512,35 @@ export function updateRackRaw(
   // change (e.g. a cycle-rack shortcut) cannot mutate the wrong rack (#2737).
   const target = getTargetRack(ctx, rackId);
   if (!target) return;
+  const constrainedUpdates = constrainRackProfileUpdates(target.rack, updates);
 
-  updateRackAtIndex(ctx, target.index, (rack) => ({ ...rack, ...updates }));
+  updateRackAtIndex(ctx, target.index, (rack) =>
+    withRackProfileDefaults({
+      ...rack,
+      ...constrainedUpdates,
+    }),
+  );
+}
+
+/**
+ * Apply settings already validated and captured by a history command.
+ * Undefined optional fields are preserved exactly instead of being interpreted
+ * as current authoring, while an explicit named profile still owns its physical
+ * dimensions if unrelated raw mutations occurred between undo and redo.
+ */
+export function applyRackSettingsFromHistoryRaw(
+  ctx: LayoutStateAccess,
+  updates: Partial<Omit<Rack, "devices" | "view">>,
+): void {
+  const target = getTargetRack(ctx);
+  if (!target) return;
+
+  updateRackAtIndex(ctx, target.index, (rack) => {
+    const nextRack = { ...rack, ...updates };
+    return isRackMateT1Plus(nextRack)
+      ? withRackProfileDefaults(nextRack)
+      : nextRack;
+  });
 }
 
 /**
@@ -521,7 +553,7 @@ export function replaceRackRaw(ctx: LayoutStateAccess, newRack: Rack): void {
   const target = getTargetRack(ctx);
   if (!target) return;
 
-  updateRackAtIndex(ctx, target.index, () => newRack);
+  updateRackAtIndex(ctx, target.index, () => withRackProfileDefaults(newRack));
 }
 
 /**
@@ -627,6 +659,25 @@ export function addCableRaw(ctx: LayoutStateAccess, cable: Cable): void {
   ctx.setLayout({
     ...layout,
     cables: [...(layout.cables ?? []), cable],
+  });
+}
+
+/** Insert a cable at a specific array index without recording history. */
+export function insertCableRaw(
+  ctx: LayoutStateAccess,
+  cable: Cable,
+  index: number,
+): void {
+  const layout = ctx.getLayout();
+  const cables = layout.cables ?? [];
+  const insertionIndex = Math.max(0, Math.min(index, cables.length));
+  ctx.setLayout({
+    ...layout,
+    cables: [
+      ...cables.slice(0, insertionIndex),
+      cable,
+      ...cables.slice(insertionIndex),
+    ],
   });
 }
 

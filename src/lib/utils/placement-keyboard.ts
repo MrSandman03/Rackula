@@ -15,7 +15,14 @@
 
 import type { Rack, DeviceType, DeviceFace } from "$lib/types";
 import { getDropFeedback } from "./dragdrop";
-import { requiresChassisBay } from "./collision";
+import {
+  findExistingContainerPlacement,
+  requiresCarrier,
+  resolveSynthesizedCarrierPlacement,
+  synthesizeCarrierForDevice,
+} from "./collision";
+import { findDeviceType } from "./device-lookup";
+import { toInternalUnits } from "./position";
 
 /**
  * Whole-U start positions (1-indexed, human units, ascending) where `device`
@@ -29,10 +36,42 @@ export function validStartPositions(
   device: DeviceType,
   face: DeviceFace = "front",
 ): number[] {
-  // A device that can only live in a chassis bay (a chassis child, or a
-  // half-width device with no rail carrier) has no valid rail start position:
-  // announcing one would be dishonest and Enter would fail (#2854).
-  if (requiresChassisBay(device, rack.width)) return [];
+  const carrierSlug = synthesizeCarrierForDevice(device, rack.width);
+  if (requiresCarrier(device, rack.width)) {
+    const carrierType = carrierSlug
+      ? findDeviceType(carrierSlug, deviceLibrary)
+      : undefined;
+
+    const positions: number[] = [];
+    for (let startU = 1; startU <= rack.height; startU++) {
+      const targetPosition = toInternalUnits(startU);
+      const existing = findExistingContainerPlacement(
+        rack,
+        deviceLibrary,
+        device,
+        targetPosition,
+        face,
+      );
+      if (existing) {
+        positions.push(startU);
+        continue;
+      }
+      if (
+        carrierType &&
+        startU <= rack.height - carrierType.u_height + 1 &&
+        resolveSynthesizedCarrierPlacement(
+          rack,
+          deviceLibrary,
+          device,
+          carrierType,
+          targetPosition,
+        )
+      ) {
+        positions.push(startU);
+      }
+    }
+    return positions;
+  }
 
   const positions: number[] = [];
   const deviceHeight = device.u_height;
@@ -46,12 +85,74 @@ export function validStartPositions(
         startU,
         undefined,
         face,
+        device,
       ) === "valid"
     ) {
       positions.push(startU);
     }
   }
   return positions;
+}
+
+export interface KeyboardPlacementPreview {
+  height: number;
+  feedback: "valid" | "invalid" | "blocked";
+}
+
+/** Resolve the exact footprint shown for a keyboard placement cursor. */
+export function keyboardPlacementPreview(
+  rack: Rack,
+  deviceLibrary: DeviceType[],
+  device: DeviceType,
+  position: number,
+  face: DeviceFace = "front",
+): KeyboardPlacementPreview {
+  if (requiresCarrier(device, rack.width)) {
+    const targetPosition = toInternalUnits(position);
+    const existing = findExistingContainerPlacement(
+      rack,
+      deviceLibrary,
+      device,
+      targetPosition,
+      face,
+    );
+    if (existing) {
+      return { height: existing.containerHeight, feedback: "valid" };
+    }
+
+    const carrierSlug = synthesizeCarrierForDevice(device, rack.width);
+    const carrierType = carrierSlug
+      ? findDeviceType(carrierSlug, deviceLibrary)
+      : undefined;
+    if (!carrierType) {
+      return { height: device.u_height, feedback: "invalid" };
+    }
+    return {
+      height: carrierType.u_height,
+      feedback: resolveSynthesizedCarrierPlacement(
+        rack,
+        deviceLibrary,
+        device,
+        carrierType,
+        targetPosition,
+      )
+        ? "valid"
+        : "blocked",
+    };
+  }
+
+  return {
+    height: device.u_height,
+    feedback: getDropFeedback(
+      rack,
+      deviceLibrary,
+      device.u_height,
+      position,
+      undefined,
+      face,
+      device,
+    ),
+  };
 }
 
 /**

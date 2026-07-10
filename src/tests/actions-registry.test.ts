@@ -163,6 +163,36 @@ describe("actions registry", () => {
       expect(dup?.enabledWhen?.(disabledCtx)).toBe(false);
     });
 
+    it("keeps carrier-child actions scoped to the child itself", () => {
+      const childCtx = {
+        hasSelection: true,
+        isDeviceSelected: true,
+        isRackSelected: false,
+        canUndo: false,
+        canRedo: false,
+        hasRacks: true,
+        mode: "browser" as const,
+        canMoveDeviceSlot: true,
+        isContainerChildSelected: true,
+      };
+
+      for (const id of [
+        "move-device-up",
+        "move-device-down",
+        "flip-device-face",
+        "duplicate-selection",
+      ] as const) {
+        expect(getActionById(id)?.enabledWhen?.(childCtx)).toBe(false);
+      }
+
+      expect(getActionById("move-device-slot")?.enabledWhen?.(childCtx)).toBe(
+        true,
+      );
+      expect(getActionById("delete-selection")?.enabledWhen?.(childCtx)).toBe(
+        true,
+      );
+    });
+
     it("gates undo/redo by history availability", () => {
       const undo = getActionById("undo");
       const redo = getActionById("redo");

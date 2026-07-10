@@ -26,6 +26,14 @@ import { fileURLToPath } from "node:url";
 
 import type { z as Zod } from "$lib/zod.ts";
 import type { LayoutSchema as LayoutSchemaType } from "$lib/schemas/index.ts";
+import {
+  RACKMATE_T1_PLUS_DEPTH_MM,
+  RACKMATE_T1_PLUS_HEIGHT,
+} from "$lib/types/constants.ts";
+import {
+  RACKMATE_T1_PLUS_PROFILE,
+  RACKMATE_T1_PLUS_WIDTH,
+} from "$lib/utils/rack-profile.ts";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, "..");
@@ -59,6 +67,75 @@ export const SCHEMA_DESCRIPTION =
   "generation, unknown-field preservation). Expect roughly 80 percent " +
   "validation coverage; the Zod schema in src/lib/schemas/index.ts is " +
   "authoritative.";
+
+const RACKMATE_PROFILE_CONSTRAINT = {
+  if: {
+    properties: {
+      profile: { const: RACKMATE_T1_PLUS_PROFILE },
+    },
+    required: ["profile"],
+  },
+  then: {
+    properties: {
+      // depth_mm stays optional because the runtime transform supplies this
+      // default, but an explicitly serialized value must match the profile.
+      depth_mm: {
+        const: RACKMATE_T1_PLUS_DEPTH_MM,
+        default: RACKMATE_T1_PLUS_DEPTH_MM,
+        type: "number",
+      },
+      height: { const: RACKMATE_T1_PLUS_HEIGHT, type: "integer" },
+      width: { const: RACKMATE_T1_PLUS_WIDTH, type: "number" },
+    },
+  },
+};
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Zod projects transforms as their input shape, so the fixed physical envelope
+ * applied by withRackProfileDefaults() is otherwise absent from JSON Schema.
+ * Add the constraint to both the legacy `rack` and modern `racks[]` shapes.
+ */
+function projectRackMateProfileConstraints(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(projectRackMateProfileConstraints);
+  }
+  if (!isObject(value)) return value;
+
+  const projected = Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [
+      key,
+      projectRackMateProfileConstraints(child),
+    ]),
+  );
+  const properties = isObject(projected.properties)
+    ? projected.properties
+    : null;
+  const profile =
+    properties && isObject(properties.profile) ? properties.profile : null;
+  const profileValues = Array.isArray(profile?.enum)
+    ? profile.enum
+    : [profile?.const];
+  const isRackSchema =
+    projected.type === "object" &&
+    profileValues.includes(RACKMATE_T1_PLUS_PROFILE) &&
+    properties?.height !== undefined &&
+    properties.width !== undefined &&
+    properties.depth_mm !== undefined;
+
+  if (!isRackSchema) return projected;
+
+  return {
+    ...projected,
+    allOf: [
+      ...(Array.isArray(projected.allOf) ? projected.allOf : []),
+      RACKMATE_PROFILE_CONSTRAINT,
+    ],
+  };
+}
 
 /**
  * Recursively sort object keys so the output is byte-stable across runs.
@@ -97,12 +174,17 @@ export function assembleSchema(
   const { $schema: _generatedDialect, ...rest } = generated;
   void _generatedDialect;
 
+  const constrained = projectRackMateProfileConstraints(rest) as Record<
+    string,
+    unknown
+  >;
+
   return sortKeys({
     $schema: JSON_SCHEMA_DIALECT,
     $id: SCHEMA_ID,
     $description: SCHEMA_DESCRIPTION,
     title: "Rackula Layout",
-    ...rest,
+    ...constrained,
   }) as Record<string, unknown>;
 }
 

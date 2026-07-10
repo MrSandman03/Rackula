@@ -52,4 +52,72 @@ describe("slot geometry", () => {
       height: 40,
     });
   });
+
+  it("leaves unused space above an underfilled explicit grid", () => {
+    const slots = [
+      {
+        id: "bottom",
+        position: { row: 0, col: 0 },
+        width_fraction: 1,
+        height_units: 1,
+      },
+    ];
+
+    const geometry = buildSlotGeometry(slots, 200, 80, 2);
+
+    expect(geometry.get("bottom")).toMatchObject({
+      x: 0,
+      y: 40,
+      width: 200,
+      height: 40,
+      heightUnits: 1,
+    });
+  });
+
+  it("renders an omitted mixed-grid row as the same 1U used by fit checks", () => {
+    const slots = [
+      {
+        id: "bottom",
+        position: { row: 0, col: 0 },
+        width_fraction: 1,
+      },
+      {
+        id: "top",
+        position: { row: 1, col: 0 },
+        width_fraction: 1,
+        height_units: 1,
+      },
+    ];
+
+    const geometry = buildSlotGeometry(slots, 200, 80, 2);
+
+    expect(geometry.get("bottom")).toMatchObject({
+      y: 40,
+      height: 40,
+      heightUnits: 1,
+    });
+    expect(geometry.get("top")).toMatchObject({
+      y: 0,
+      height: 40,
+      heightUnits: 1,
+    });
+  });
+
+  it("fills a legacy multi-U container with one width-only row", () => {
+    const slots = [
+      {
+        id: "full-height",
+        position: { row: 0, col: 0 },
+        width_fraction: 1,
+      },
+    ];
+
+    expect(
+      buildSlotGeometry(slots, 200, 80, 2).get("full-height"),
+    ).toMatchObject({
+      y: 0,
+      height: 80,
+      heightUnits: 2,
+    });
+  });
 });

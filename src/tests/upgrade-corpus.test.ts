@@ -9,6 +9,12 @@ import {
   findSilentLosses,
   type AllowListEntry,
 } from "./upgrade-corpus-helpers";
+import {
+  effectiveSlotHeightUnits,
+  getSlotFitIssues,
+  validateSlotTopology,
+} from "$lib/utils/slot-fit";
+import { DeviceTypeSchema, LayoutSchema } from "$lib/schemas";
 
 interface Sidecar {
   reject?: boolean;
@@ -108,5 +114,177 @@ describe("upgrade corpus: depth/base-weight defaults (#2738)", () => {
     const rack = layout.racks[0]!;
     expect(rack.depth_mm).toBe(1000);
     expect(rack.base_weight).toBe(0);
+  });
+});
+
+const legacyRackMateYaml = (
+  await import("./fixtures/upgrade-corpus/legacy-rackmate-t1-plus-profile.rackula.yaml?raw")
+).default as string;
+const legacyRackMateOverRackYaml = (
+  await import("./fixtures/upgrade-corpus/v26.6.6-rackmate-over-rack.rackula.yaml?raw")
+).default as string;
+
+describe("upgrade corpus: legacy RackMate profile inference", () => {
+  it("infers the named profile from the exact old YAML signature", async () => {
+    const layout = await parseLayoutYaml(legacyRackMateYaml);
+
+    expect(layout.racks[0]).toMatchObject({
+      name: "RackMate T1 Plus",
+      profile: "rackmate-t1-plus",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+  });
+
+  it("retains the prior-release over-rack clamp after profile inference", async () => {
+    const layout = await parseLayoutYaml(legacyRackMateOverRackYaml);
+
+    expect(layout.racks[0]?.profile).toBe("rackmate-t1-plus");
+    expect(layout.racks[0]?.devices[0]?.position).toBe(42);
+  });
+});
+
+const preStrictChildFitYaml = (
+  await import("./fixtures/upgrade-corpus/v26.6.6-pre-strict-child-fit.rackula.yaml?raw")
+).default as string;
+
+describe("upgrade corpus: fit checks added after v26.6.6", () => {
+  it("loads prior-valid physical-height and rack-width metadata", async () => {
+    const layout = await parseLayoutYaml(preStrictChildFitYaml);
+
+    expect(layout.racks[0]?.devices.map((device) => device.id)).toEqual([
+      "legacy-fit-container",
+      "legacy-tall-child",
+      "legacy-width-child",
+    ]);
+  });
+
+  it("keeps the new fit checks strict at the current authoring boundary", async () => {
+    const parsed = await parseYaml(preStrictChildFitYaml);
+    const result = LayoutSchema.safeParse(parsed);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.message)).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("taller than slot"),
+          expect.stringContaining("not compatible with a 19-inch rack"),
+        ]),
+      );
+    }
+  });
+});
+
+const allOmittedMultirowYaml = (
+  await import("./fixtures/upgrade-corpus/v26.6.6-all-omitted-multirow-slots.rackula.yaml?raw")
+).default as string;
+
+describe("upgrade corpus: all-omitted multirow slot heights", () => {
+  it("loads the prior-valid child while runtime row geometry stays corrected", async () => {
+    const layout = await parseLayoutYaml(allOmittedMultirowYaml);
+    const containerType = layout.device_types.find(
+      (deviceType) => deviceType.slug === "legacy-2u-container",
+    )!;
+    const slots = containerType.slots!;
+
+    expect(
+      layout.racks[0]?.devices.find((device) => device.id === "legacy-child"),
+    ).toMatchObject({
+      container_id: "legacy-container",
+      slot_id: "bottom",
+      position: 0,
+    });
+    expect(slots.every((slot) => slot.height_units === undefined)).toBe(true);
+    expect(
+      effectiveSlotHeightUnits(slots[0]!, {
+        containerHeightUnits: containerType.u_height,
+        containerSlots: slots,
+      }),
+    ).toBe(1);
+  });
+});
+
+const mixedOmittedMultirowYaml = (
+  await import("./fixtures/upgrade-corpus/v26.6.6-mixed-omitted-multirow-slots.rackula.yaml?raw")
+).default as string;
+
+describe("upgrade corpus: mixed omitted multirow slot heights", () => {
+  it("loads a prior-valid tall child while runtime uses the corrected omitted-row height", async () => {
+    const layout = await parseLayoutYaml(mixedOmittedMultirowYaml);
+    const containerType = layout.device_types.find(
+      (deviceType) => deviceType.slug === "legacy-mixed-container-type",
+    )!;
+    const childType = layout.device_types.find(
+      (deviceType) => deviceType.slug === "legacy-mixed-child-type",
+    )!;
+    const slots = containerType.slots!;
+    const omittedSlot = slots.find((slot) => slot.id === "omitted-bottom")!;
+
+    expect(
+      layout.racks[0]?.devices.find(
+        (device) => device.id === "legacy-mixed-child",
+      ),
+    ).toMatchObject({
+      container_id: "legacy-mixed-container",
+      slot_id: "omitted-bottom",
+      position: 0,
+    });
+    expect(omittedSlot.height_units).toBeUndefined();
+    expect(
+      effectiveSlotHeightUnits(omittedSlot, {
+        containerHeightUnits: containerType.u_height,
+        containerSlots: slots,
+      }),
+    ).toBe(1);
+    expect(
+      getSlotFitIssues(childType, omittedSlot, {
+        rackWidth: layout.racks[0]?.width,
+        containerHeightUnits: containerType.u_height,
+        containerSlots: slots,
+      }),
+    ).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "height" })]),
+    );
+  });
+});
+
+const explicitRowHeightOverflowYaml = (
+  await import("./fixtures/upgrade-corpus/v26.6.6-explicit-row-height-overflow.rackula.yaml?raw")
+).default as string;
+
+describe("upgrade corpus: explicit row-height overflow", () => {
+  it("loads the prior-valid grid without weakening standalone device authoring", async () => {
+    const layout = await parseLayoutYaml(explicitRowHeightOverflowYaml);
+    const containerType = layout.device_types.find(
+      (deviceType) => deviceType.slug === "legacy-explicit-container-type",
+    )!;
+
+    expect(
+      layout.racks[0]?.devices.find(
+        (device) => device.id === "legacy-explicit-child",
+      ),
+    ).toMatchObject({
+      container_id: "legacy-explicit-container",
+      slot_id: "two-u-bottom",
+      position: 0,
+    });
+    expect(containerType.slots?.map((slot) => slot.height_units)).toEqual([
+      2, 1,
+    ]);
+    expect(
+      validateSlotTopology(containerType.slots!, containerType.u_height),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "height_overflow" }),
+      ]),
+    );
+    expect(DeviceTypeSchema.safeParse(containerType).success).toBe(false);
+  });
+
+  it("is rejected by the current layout authoring schema", async () => {
+    const parsed = await parseYaml(explicitRowHeightOverflowYaml);
+
+    expect(LayoutSchema.safeParse(parsed).success).toBe(false);
   });
 });

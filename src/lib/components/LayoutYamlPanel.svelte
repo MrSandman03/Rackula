@@ -4,7 +4,7 @@
   import { LayoutSchema } from "$lib/schemas";
   import { buildYamlFilename } from "$lib/utils/folder-structure";
   import {
-    parseLayoutYamlWithImages,
+    parseCurrentLayoutYamlWithImages,
     parseYaml,
     serializeLayoutToYaml,
   } from "$lib/utils/yaml";
@@ -38,7 +38,9 @@
   let schemaError = $state<string | null>(null);
   let showConflictPrompt = $state(false);
   let latestYamlAtConflict = $state<string | null>(null);
-  type ParsedYaml = Awaited<ReturnType<typeof parseLayoutYamlWithImages>>;
+  type ParsedYaml = Awaited<
+    ReturnType<typeof parseCurrentLayoutYamlWithImages>
+  >;
   let pendingLayout = $state<ParsedYaml | null>(null);
 
   let validationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -182,6 +184,13 @@
     if (runId !== validationRun) return;
 
     syntaxError = null;
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    ) {
+      delete (parsed as Record<string, unknown>).images;
+    }
     const schemaResult = LayoutSchema.safeParse(parsed);
     if (!schemaResult.success) {
       const firstIssue = schemaResult.error.issues[0];
@@ -248,13 +257,12 @@
 
     let parsed: ParsedYaml;
     try {
-      parsed = await parseLayoutYamlWithImages(yamlText);
+      parsed = await parseCurrentLayoutYamlWithImages(yamlText);
     } catch (error) {
       schemaError = toErrorMessage(error);
       return;
     }
     if (intent !== applyIntentId) return;
-
     const latestYaml = await serializeLayoutToYaml(layout);
     if (intent !== applyIntentId) return;
 

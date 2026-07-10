@@ -102,6 +102,18 @@ describe("verb-bars projection", () => {
       );
     });
 
+    it("shows only cell movement and delete for a contained child", () => {
+      const childCtx = {
+        ...deviceCtx,
+        canMoveDeviceSlot: true,
+        isContainerChildSelected: true,
+      };
+
+      expect(getVerbsForSelection(childCtx).map((action) => action.id)).toEqual(
+        ["move-device-slot", "delete-selection"],
+      );
+    });
+
     it("hides the slot verb when the device cannot change cells", () => {
       const ids = getVerbsForSelection(deviceCtx).map((a) => a.id);
       expect(ids).not.toContain("move-device-slot");

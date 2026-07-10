@@ -11,7 +11,12 @@
 import type { DeviceFace, DeviceType, PlacedDevice } from "$lib/types";
 import { UNITS_PER_U, DEFAULT_DEVICE_FACE } from "$lib/types/constants";
 import { toInternalUnits, toHumanUnits } from "$lib/utils/position";
-import { canPlaceDevice, requiresCarrier } from "$lib/utils/collision";
+import {
+  canPlaceDevice,
+  findEmptyAutoCarrierAfterChildMove,
+  getProspectiveRackAfterDeviceMove,
+  requiresCarrier,
+} from "$lib/utils/collision";
 import { effectiveFace } from "$lib/utils/effective-face";
 import { findDeviceType as findDeviceTypeInArray } from "$lib/stores/layout-helpers";
 import { findDeviceType } from "$lib/utils/device-lookup";
@@ -22,12 +27,12 @@ import {
   createAddDeviceTypeCommand,
   createPlaceDeviceCommand,
   createMoveDeviceCommand,
-  createRemoveDeviceCommand,
+  createRemoveDeviceAssemblyCommand,
+  createRackDevicesTransitionCommand,
   createUpdateDeviceFaceCommand,
   createUpdateDeviceNameCommand,
   createUpdateDevicePlacementImageCommand,
   createUpdateDeviceColourCommand,
-  createDetachContainerCommand,
   createUpdateDeviceNotesCommand,
   createUpdateDeviceIpCommand,
   createBatchCommand,
@@ -36,6 +41,7 @@ import {
 import type { LayoutStateAccess } from "./types";
 import { getCommandStoreAdapter } from "./command-adapters";
 import { getRackById } from "./rack-actions";
+import { bindCommandToRack } from "./recorded-rack-actions";
 
 /**
  * Check if a device type needs auto-importing from starter/brand packs.
@@ -217,6 +223,8 @@ export function moveDeviceRecorded(
   deviceIndex: number,
   newPositionU: number,
   newFace?: DeviceFace,
+  snapshotDevice: (device: PlacedDevice) => PlacedDevice = (device) =>
+    structuredClone(device),
 ): boolean {
   // Convert to internal units
   const newPositionInternal = toInternalUnits(newPositionU);
@@ -270,6 +278,14 @@ export function moveDeviceRecorded(
   const deviceName = deviceType.model ?? deviceType.slug;
   const oldPositionInternal = device.position;
   const oldPositionU = toHumanUnits(oldPositionInternal);
+  const hasContainerLinkage = device.container_id !== undefined;
+  const emptySourceCarrier = hasContainerLinkage
+    ? findEmptyAutoCarrierAfterChildMove(targetRack, device)
+    : undefined;
+  const validationRack = hasContainerLinkage
+    ? getProspectiveRackAfterDeviceMove(targetRack, device.id)
+    : targetRack;
+  const validationExcludeIndex = hasContainerLinkage ? undefined : deviceIndex;
 
   // Carrier-first rule (#2158/C4): a move always lands on a rack-level rail
   // position and detaches any container linkage. A carrier-requiring device
@@ -299,11 +315,11 @@ export function moveDeviceRecorded(
   );
   if (
     !canPlaceDevice(
-      targetRack,
+      validationRack,
       layout.device_types,
       deviceType.u_height,
       newPositionInternal,
-      deviceIndex,
+      validationExcludeIndex,
       resolvedFace,
       undefined,
       deviceType,
@@ -344,9 +360,73 @@ export function moveDeviceRecorded(
   // out of its container must shed its container linkage (otherwise it stays
   // excluded from rack-level collision while claiming membership in a container
   // it no longer sits in). Undo restores the linkage.
-  const hasContainerLinkage = device.container_id !== undefined;
+  const assemblyChildren = targetRack.devices.filter(
+    (candidate) => candidate.container_id === device.id,
+  );
 
-  if (hasFaceChange || hasContainerLinkage) {
+  if (assemblyChildren.length > 0) {
+    const beforeDevices = targetRack.devices.map(snapshotDevice);
+    const afterDevices = beforeDevices.map((candidate) => {
+      if (candidate.id === device.id) {
+        return {
+          ...candidate,
+          position: newPositionInternal,
+          face: normalizedNewFace ?? candidate.face,
+        };
+      }
+      return candidate.container_id === device.id
+        ? { ...candidate, face: normalizedNewFace ?? device.face }
+        : candidate;
+    });
+    history.execute(
+      createRackDevicesTransitionCommand(
+        rackId,
+        beforeDevices,
+        afterDevices,
+        adapter,
+        `Move ${deviceName}`,
+      ),
+    );
+    ctx.markDirty();
+    return true;
+  }
+
+  if (hasContainerLinkage) {
+    const beforeDevices = targetRack.devices.map(snapshotDevice);
+    const afterDevices = beforeDevices
+      .filter((candidate) => candidate.id !== emptySourceCarrier?.id)
+      .map((candidate) =>
+        candidate.id === device.id
+          ? {
+              ...candidate,
+              position: newPositionInternal,
+              face: normalizedNewFace ?? candidate.face,
+              container_id: undefined,
+              slot_id: undefined,
+            }
+          : candidate,
+      );
+    history.execute(
+      createRackDevicesTransitionCommand(
+        rackId,
+        beforeDevices,
+        afterDevices,
+        adapter,
+        `Move ${deviceName}`,
+        "MOVE_DEVICE",
+        emptySourceCarrier
+          ? {
+              removedImageDevices: [emptySourceCarrier],
+              layoutId: layout.metadata?.id ?? "",
+            }
+          : undefined,
+      ),
+    );
+    ctx.markDirty();
+    return true;
+  }
+
+  if (hasFaceChange) {
     const commands: Command[] = [moveCommand];
     if (hasFaceChange) {
       commands.push(
@@ -354,17 +434,6 @@ export function moveDeviceRecorded(
           deviceIndex,
           device.face ?? "front",
           normalizedNewFace!,
-          adapter,
-          deviceName,
-        ),
-      );
-    }
-    if (hasContainerLinkage) {
-      commands.push(
-        createDetachContainerCommand(
-          deviceIndex,
-          device.container_id,
-          device.slot_id,
           adapter,
           deviceName,
         ),
@@ -409,9 +478,20 @@ export function removeDeviceRecorded(
   // Set active rack so Raw functions target the correct rack
   ctx.setActiveRackId(rackId);
 
-  // Get a snapshot to convert from reactive proxy to plain object
-  // structuredClone in the command factory requires a plain object
-  const device = snapshotDevice(targetRack.devices[deviceIndex]!);
+  // Get snapshots to convert reactive proxies to plain objects. An occupied
+  // carrier is removed with every direct child as one exact roster transition.
+  const beforeDevices = targetRack.devices.map(snapshotDevice);
+  const device = beforeDevices[deviceIndex]!;
+  const children = beforeDevices.filter(
+    (candidate) => candidate.container_id === device.id,
+  );
+  const parent = device.container_id
+    ? beforeDevices.find((candidate) => candidate.id === device.container_id)
+    : undefined;
+  const isLastChildOfAutoCarrier =
+    !!parent?.auto_created &&
+    beforeDevices.filter((candidate) => candidate.container_id === parent.id)
+      .length === 1;
   const layout = ctx.getLayout();
   const deviceType = findDeviceTypeInArray(
     layout.device_types,
@@ -422,13 +502,23 @@ export function removeDeviceRecorded(
   const history = ctx.getHistory();
   const adapter = getCommandStoreAdapter(ctx);
 
-  const command = createRemoveDeviceCommand(
-    device,
+  const command = createRemoveDeviceAssemblyCommand(
+    beforeDevices,
+    beforeDevices.filter(
+      (candidate) =>
+        candidate.id !== device.id &&
+        candidate.container_id !== device.id &&
+        (!isLastChildOfAutoCarrier || candidate.id !== parent?.id),
+    ),
+    isLastChildOfAutoCarrier && parent
+      ? [parent, device]
+      : [device, ...children],
     adapter,
     deviceName,
     layout.metadata?.id ?? "",
+    layout.cables?.map((cable) => ({ ...cable })) ?? [],
   );
-  history.execute(command);
+  history.execute(bindCommandToRack(ctx, rackId, command));
   ctx.markDirty();
 }
 
@@ -444,6 +534,8 @@ export function updateDeviceFaceRecorded(
   rackId: string,
   deviceIndex: number,
   face: DeviceFace,
+  snapshotDevice: (device: PlacedDevice) => PlacedDevice = (device) =>
+    structuredClone(device),
 ): void {
   const targetRack = getRackById(ctx, rackId);
   if (!targetRack) return;
@@ -473,6 +565,30 @@ export function updateDeviceFaceRecorded(
 
   const history = ctx.getHistory();
   const adapter = getCommandStoreAdapter(ctx);
+
+  const children = targetRack.devices.filter(
+    (candidate) => candidate.container_id === device.id,
+  );
+  if (children.length > 0) {
+    const beforeDevices = targetRack.devices.map(snapshotDevice);
+    const afterDevices = beforeDevices.map((candidate) =>
+      candidate.id === device.id || candidate.container_id === device.id
+        ? { ...candidate, face: targetFace }
+        : candidate,
+    );
+    history.execute(
+      createRackDevicesTransitionCommand(
+        rackId,
+        beforeDevices,
+        afterDevices,
+        adapter,
+        `Flip ${deviceName}`,
+        "UPDATE_DEVICE_FACE",
+      ),
+    );
+    ctx.markDirty();
+    return;
+  }
 
   const command = createUpdateDeviceFaceCommand(
     deviceIndex,

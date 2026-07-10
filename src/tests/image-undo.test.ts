@@ -11,6 +11,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { getImageStore, resetImageStore } from "$lib/stores/images.svelte";
 import {
   createRemoveDeviceCommand,
+  createRemoveDeviceAssemblyCommand,
   createCrossRackMoveCommand,
 } from "$lib/stores/commands/device";
 import { createDeleteDeviceTypeCommand } from "$lib/stores/commands/device-type";
@@ -206,6 +207,69 @@ describe("Image Undo — Device Removal", () => {
     cmd.execute();
     // Should not throw
     expect(() => cmd.undo()).not.toThrow();
+  });
+
+  it("removing an occupied carrier cleans up and restores every placement image", () => {
+    const imageStore = getImageStore();
+    const carrier = createTestDevice({ id: "carrier-1" });
+    const child = createTestDevice({
+      id: "child-1",
+      container_id: carrier.id,
+      slot_id: "left",
+    });
+    const survivor = createTestDevice({ id: "survivor" });
+    const before = [carrier, child, survivor];
+    const after = [survivor];
+    let devices = before;
+    const store = {
+      restoreRackDevicesRaw(next: PlacedDevice[]) {
+        devices = next;
+      },
+      getCables() {
+        return [];
+      },
+      insertCableRaw() {},
+      removeCableRaw() {},
+    };
+    const carrierKey = placementKey(TEST_LAYOUT_ID, carrier.id);
+    const childKey = placementKey(TEST_LAYOUT_ID, child.id);
+    imageStore.setDeviceImage(
+      carrierKey,
+      "front",
+      createMockImageData("carrier-front.png"),
+    );
+    imageStore.setDeviceImage(
+      childKey,
+      "rear",
+      createMockImageData("child-rear.png"),
+    );
+
+    const command = createRemoveDeviceAssemblyCommand(
+      before,
+      after,
+      [carrier, child],
+      store,
+      "Carrier",
+      TEST_LAYOUT_ID,
+    );
+
+    command.execute();
+    expect(devices).toEqual(after);
+    expect(imageStore.hasImage(carrierKey, "front")).toBe(false);
+    expect(imageStore.hasImage(childKey, "rear")).toBe(false);
+
+    command.undo();
+    expect(devices).toEqual(before);
+    expect(imageStore.getDeviceImage(carrierKey, "front")?.filename).toBe(
+      "carrier-front.png",
+    );
+    expect(imageStore.getDeviceImage(childKey, "rear")?.filename).toBe(
+      "child-rear.png",
+    );
+
+    command.execute();
+    expect(imageStore.hasImage(carrierKey, "front")).toBe(false);
+    expect(imageStore.hasImage(childKey, "rear")).toBe(false);
   });
 });
 

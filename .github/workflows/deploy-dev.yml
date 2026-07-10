@@ -37,6 +37,7 @@ jobs:
   # For manual test runs, use the test.yml workflow
 
   build-frontend:
+    if: ${{ github.repository == 'RackulaLives/Rackula' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -77,6 +78,7 @@ jobs:
             APP_COMMIT=${{ env.BUILD_COMMIT }}
 
   build-api:
+    if: ${{ github.repository == 'RackulaLives/Rackula' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -135,6 +137,7 @@ jobs:
 
   deploy:
     needs: [build-frontend, build-api]
+    if: ${{ github.repository == 'RackulaLives/Rackula' }}
     runs-on: [self-hosted, vps-rackula]
     environment:
       name: dev
@@ -182,6 +185,7 @@ jobs:
 
   smoke-test:
     needs: deploy
+    if: ${{ github.repository == 'RackulaLives/Rackula' }}
     runs-on: [self-hosted, vps-rackula]
     timeout-minutes: 10
     permissions:

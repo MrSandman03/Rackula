@@ -1,5 +1,5 @@
 ---
-description: Orchestrate Rackula GitHub issues through to merged PRs via parallel per-issue subagents (worktree-isolated, skill-gated, auto-merge after both bots approve)
+description: Orchestrate Rackula GitHub issues through reviewed PRs via parallel per-issue subagents
 argument-hint: <issue numbers, e.g. 2295 2296 2165>
 ---
 
@@ -22,21 +22,21 @@ If no issue numbers were provided, ask which issues to work before doing anythin
    - ALWAYS: superpowers routing (brainstorming / systematic-debugging / TDD as the task fits)
    - IF security-sensitive: `/secure-coding`
    - IF frontend: `/frontend-design:frontend-design` Follow the project TDD protocol (test only high-value behaviour; skip low-value tests).
-4. **Self-review** — Run `/code-review` on the diff BEFORE opening the PR. Fix what it finds.
-5. **Open PR** — Verify local gates first (`npm run lint`, `npm run test:run`, `npm run build`), then push and `gh pr create`. Include `Co-Authored-By`.
+4. **Exact-head review** — Commit first, then dispatch a reviewer who did not implement the change to review the complete base-to-HEAD diff. Fix findings in new commits, re-verify, and repeat review on the new HEAD.
+5. **Open PR** — After an exact-head PASS, push and create a draft PR with the reviewed SHA, reviewer, verdict, and verification evidence. Include `Co-Authored-By`.
 
 ## Review-feedback loop (mandatory)
 
-When CodeRabbit, CodeAnt, or `/code-review` returns feedback on the PR, invoke `/superpowers:receiving-code-review` to process it. Do NOT performatively agree or blindly apply suggestions — verify each one technically, push back in-thread on false positives with reasoning, and only commit genuine fixes. Re-request review after pushing changes.
+When a reviewer, CI analyzer, or `/code-review` returns feedback on the PR, invoke `/superpowers:receiving-code-review` to process it. Do not performatively agree or blindly apply suggestions. Verify each finding technically, rebut false positives with reasoning, and commit only genuine fixes. Re-request review after pushing changes.
 
-## Merge gate (auto-merge when ALL are true)
+## Merge gate (ALL must be true)
 
 - CI fully green AND `mergeStateStatus` is CLEAN (a DIRTY/conflicted PR silently skips CI — check `gh pr view <N> --json mergeable,mergeStateStatus` before trusting green checks).
-- CodeRabbit has approved with zero open findings — OR is genuinely unavailable (credits exhausted / rate-limited), in which case a clean local `/code-review` is the fallback gate.
-- CodeAnt has approved — OR is not configured as a check on this repo (then skip it).
+- The complete diff has a clean independent review. High-risk or cross-cutting changes have at least two independent reviews.
 - Every review item is resolved or rebutted via `/superpowers:receiving-code-review`.
+- A human has explicitly approved the merge.
 
-When the gate passes: `gh pr merge` (squash), then `gh issue close <N> --comment "Implemented in <commit>"`. Never merge on green CI alone.
+When the gate passes: `gh pr merge` (squash), then `gh issue close <N> --comment "Implemented in <commit>"`. Never merge on green CI alone or without human approval.
 
 ## Orchestration rules
 
@@ -47,8 +47,8 @@ When the gate passes: `gh pr merge` (squash), then `gh issue close <N> --comment
 
 ## Stop conditions (per issue)
 
-Stop and record in `blockers-<N>.md` if: a test fails twice with no resolution, the issue is genuinely ambiguous and needs a human decision, or a merge conflict you can't cleanly resolve. Otherwise proceed autonomously to merge.
+Stop and record in `blockers-<N>.md` if: a test fails twice with no resolution, the issue is genuinely ambiguous and needs a human decision, or a merge conflict you can't cleanly resolve. Otherwise proceed autonomously to a reviewed, CI-green PR and stop for explicit human merge approval.
 
 ## Final report
 
-Per issue: status (MERGED / blocked / needs-decision), PR link, merge commit, and any follow-up issues filed.
+Per issue: status (READY / MERGED / blocked / needs-decision), PR link, reviewed SHA, merge commit when applicable, and any follow-up issues filed.

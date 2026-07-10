@@ -60,6 +60,28 @@ const bladeHalf = findStarterDevice("blade-server-half")!; // 2U child
 const bladeFull = findStarterDevice("blade-server-full")!; // 4U child
 /** A real generic 2U half-width device (no child role): DeskPi 2U 4-Pi tray. */
 const genericTwoU = findBrandDevice("deskpi-rackmate-2u-4-pi")!; // 2U half-width
+const tooTallSubU: DeviceType = {
+  slug: "too-tall-sub-u",
+  model: "Too Tall Sub-U",
+  u_height: 0.75,
+  slot_width: 1,
+  category: "network",
+  colour: "#4A90D9",
+};
+const deepHalfWidth: DeviceType = {
+  slug: "deep-half-width-preview",
+  model: "Deep Half Width",
+  u_height: 0.5,
+  slot_width: 1,
+  is_full_depth: false,
+  category: "network",
+  colour: "#4A90D9",
+  custom_fields: {
+    rackula_fit: {
+      dimensions_mm: { width: 100, depth: 300, height: 20 },
+    },
+  },
+};
 /** A full-width whole-U rail device: no carrier applies, never a chassis bay. */
 const fullWidthRail: DeviceType = {
   slug: "server-1u",
@@ -177,6 +199,19 @@ describe("validStartPositions (keyboard honesty)", () => {
     expect(
       validStartPositions(rack, [], genericTwoU, "front").length,
     ).toBeGreaterThan(0);
+  });
+
+  it.each([
+    ["too-tall child", tooTallSubU],
+    ["too-deep assembly", deepHalfWidth],
+  ])("announces no rail slots for a %s", (_label, device) => {
+    const rack = createTestRack({
+      height: 12,
+      depth_mm: 260,
+      devices: [],
+    });
+
+    expect(validStartPositions(rack, [device], device, "front")).toEqual([]);
   });
 });
 
@@ -358,4 +393,42 @@ describe("resolveDropTarget / resolveDropAction (bare-rails agreement)", () => {
       expect(action.slug).toBe(genericTwoU.slug);
     }
   });
+
+  it.each([
+    ["too-tall child", tooTallSubU],
+    ["too-deep assembly", deepHalfWidth],
+  ])(
+    "blocks preview and action for a synthesized carrier with a %s",
+    (_label, device) => {
+      const rack = createTestRack({
+        height: 12,
+        depth_mm: 260,
+        devices: [],
+      });
+      const preview = resolveDropTarget(
+        coords,
+        dims,
+        rack,
+        [device],
+        device,
+        "front",
+      );
+      const action = resolveDropAction(
+        coords,
+        dims,
+        rack,
+        [device],
+        { type: "palette", device },
+        "front",
+      );
+
+      expect(preview.feedback).toBe("blocked");
+      expect(preview.dropPreview.feedback).toBe("blocked");
+      expect(action).toMatchObject({
+        kind: "invalid",
+        feedback: "blocked",
+        message: "Device and carrier don't fit this rack",
+      });
+    },
+  );
 });

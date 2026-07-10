@@ -125,22 +125,23 @@ START
                          Run verification
                                │
                                ▼
-                    ┌──── /code-review ◀────────┐
-                    │          │                │
-                    │    Findings?              │
-                    │     yes      no           │
-                    │      │       │            │
-                    │      ▼       ▼            │
-                    │   Fix all  Commit ────────┘
-                    │   findings   │
-                    │      │       ▼
-                    └──────┘   Push (pre-push
-                               CodeRabbit --agent
-                               gate; --no-verify
-                               only if transient)
-                                   │
-                                   ▼
-                               Create PR
+                       Pre-commit diff check
+                               │
+                               ▼
+                             Commit
+                               │
+                               ▼
+                       Exact-head review
+                               │
+                    findings?  │
+                    yes: fix, verify, commit,
+                         and repeat review
+                    no         │
+                               ▼
+                              Push
+                               │
+                               ▼
+                           Create PR
                                    │
                     ┌──────────┴──────────┐
                     ▼                     ▼
@@ -237,51 +238,9 @@ Check CLAUDE.md for `### Verification Commands`. If found, run them:
 
 If not configured, skip or ask user.
 
-### 3d. Local Code Review (before PR)
+### 3d. Pre-Commit Diff Check
 
-**MANDATORY before opening a PR.** Review the diff and resolve findings before pushing.
-
-**Do NOT run the CodeRabbit CLI here.** Repos that gate on CodeRabbit run it at push time via a pre-push hook in agent mode (see 3f). Running it manually first doubles the work.
-
-```
-┌─────────────────────────────────────────┐
-│            CODE REVIEW LOOP             │
-├─────────────────────────────────────────┤
-│                                         │
-│  1. Run /code-review (or fallback)      │
-│         │                               │
-│         ▼                               │
-│  2. Findings? ──no──▶ Proceed to commit │
-│         │                               │
-│        yes                              │
-│         ▼                               │
-│  3. Fix each finding                    │
-│         │                               │
-│         ▼                               │
-│  4. Re-run verification commands        │
-│         │                               │
-│         └────────▶ Back to step 1       │
-│                                         │
-└─────────────────────────────────────────┘
-```
-
-**Step 1: Run the review (auto-detect)**
-
-- **Preferred:** if a `/code-review` command is available in this environment, use it. It reviews the current diff for correctness bugs plus reuse/simplification/efficiency cleanups.
-- **Fallback:** if `/code-review` is unavailable, use the repo's configured reviewer (check CLAUDE.md `### Review Command`). If none, self-review the diff against the issue's acceptance criteria.
-
-**Step 2: Fix findings**
-
-Address each finding. For multiple findings, track them as tasks and mark completed as you go.
-
-**Step 3: Re-verify**
-
-After fixing, re-run verification commands (lint, test, build), then re-review. Only proceed when the review is clean.
-
-**Exit Conditions:**
-
-- **Success:** review returns no findings → proceed to commit
-- **Max iterations (3):** if findings persist after 3 cycles, ask the user whether to proceed or abort
+Review the working diff against the acceptance criteria and repository rules to catch obvious issues before committing. Fix findings and re-run affected verification. This check is useful but does not satisfy the exact-head independent review gate.
 
 ### 3e. Commit
 
@@ -291,44 +250,35 @@ After fixing, re-run verification commands (lint, test, build), then re-review. 
 Fixes #<N>")
 ```
 
-### 3f. Push (mind the pre-push gate)
+### 3f. Exact-Head Review and Push
+
+After committing, record `git rev-parse HEAD` and dispatch a reviewer who did not implement the change to review the complete base-to-HEAD diff. Use at least two independent reviewers for high-risk or cross-cutting changes.
+
+If a reviewer finds an issue, fix it, re-run affected verification, create a new commit, and repeat review against the new HEAD. Only push after the exact commit has a PASS verdict and every finding is resolved or rebutted.
 
 ```bash
 (cd "$WORKTREE_DIR" && git push -u origin <branch>)
 ```
 
-Some repos run a **pre-push hook** that gates the push on a CodeRabbit review. Detect a _CodeRabbit_ gate specifically (not just any pre-push hook):
-
-```bash
-HOOK_FILE=""
-[ -f .husky/pre-push ] && HOOK_FILE=".husky/pre-push"
-[ -f .git/hooks/pre-push ] && HOOK_FILE=".git/hooks/pre-push"
-if [ -n "$HOOK_FILE" ] && grep -qi "coderabbit" "$HOOK_FILE"; then
-  echo "CodeRabbit pre-push gate detected"
-fi
-```
-
-When present, the hook runs **CodeRabbit in agent mode** (`coderabbit review --agent`, default-deny) and blocks the push on real findings. The `--no-verify` fallback below applies **only to a CodeRabbit gate**. If a hook runs other checks (tests, lint), do not bypass them blindly.
-
-**If the push is blocked, classify the cause:**
-
-| Cause | What to do |
-| --- | --- |
-| Real review findings reported | Address them (loop back to 3d), then push again. |
-| Timeout, CLI unavailable, or unparseable output (infra failure, not findings) | Retry once with `git push --no-verify` to bypass the gate. |
-
-Only use `--no-verify` for transient/infrastructure failures. **Never** bypass to skip real findings.
+If a repository hook blocks the push, read its output and fix the underlying validation failure before retrying. A transient infrastructure failure may be retried once. Do not use `--no-verify` unless the repository explicitly allows it for the identified failure and the reason is recorded.
 
 ### 3g. Create PR
 
 ```bash
-(cd "$WORKTREE_DIR" && gh pr create \
+(cd "$WORKTREE_DIR" && gh pr create --draft \
   --title "<type>: <description> (#<N>)" \
   --body "## Summary
 <bullets>
 
 ## Test Plan
 - [ ] <verification>
+
+## Review Evidence
+- Reviewed commit: <full SHA>
+- Independent reviewer: <name or agent>
+- Verdict: PASS
+- [ ] All applicable GitHub checks pass on the reviewed commit
+- [ ] No commits were added after the recorded review
 
 Closes #<N>")
 ```
@@ -337,7 +287,8 @@ Closes #<N>")
 
 ```bash
 gh pr checks <PR> --watch
-gh pr merge <PR> --squash --delete-branch --auto
+# Stop and obtain explicit human approval for the reviewed SHA.
+gh pr merge <PR> --squash --delete-branch
 ```
 
 ### 3i. Cleanup
@@ -368,7 +319,7 @@ Check for more issues:
 
 ## Blocker Handling
 
-1. Commit WIP: `git commit -m "wip: partial #<N>" --no-verify && git push --no-verify` (parking incomplete work; the review gate would block it)
+1. Commit WIP: `git commit -m "wip: partial #<N>" && git push`.
 2. Release lock: `gh issue edit <N> --remove-label "in-progress"`
 3. Comment on issue with status, blocker, what was attempted
 4. Stop
@@ -408,18 +359,6 @@ npm run build
 
 .worktree/<custom>-issue-<N>
 ```
-
-### Review Command
-
-Used by step 3d when `/code-review` is unavailable in the environment.
-
-````markdown
-### Review Command
-
-```bash
-<repo-specific local review command>
-```
-````
 
 ---
 

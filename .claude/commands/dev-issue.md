@@ -86,7 +86,7 @@ git checkout main
 
 You have **explicit permission** to perform WITHOUT asking:
 
-| Action | Scope | | ------------ | ----------------------------------------------------------- | ---- | ----- | -------- | ---- | ------------------ | | Git branches | `(fix                                                       | feat | chore | refactor | test | docs)/<number>-\*` | | Worktrees | Sibling directories `.worktree/Rackula-issue-<N>` | | Edit files | `src/`, `docs/`, test files | | Commands | `npm test`, `npm run build`, `npm run lint`, `gh` CLI | | Git ops | add, commit, push (non-main), fetch, pull, worktree | | PRs | `gh pr create`, `gh pr merge --squash` after checks pass | | Issue labels | `gh issue edit --add-label`, `--remove-label` (for locking) |
+| Action | Scope | | ------------ | ----------------------------------------------------------- | ---- | ----- | -------- | ---- | ------------------ | | Git branches | `(fix                                                       | feat | chore | refactor | test | docs)/<number>-\*` | | Worktrees | Sibling directories `.worktree/Rackula-issue-<N>` | | Edit files | `src/`, `docs/`, test files | | Commands | `npm test`, `npm run build`, `npm run lint`, `gh` CLI | | Git ops | add, commit, push (non-main), fetch, pull, worktree | | PRs | `gh pr create`, `gh pr merge --squash` after checks and explicit human approval | | Issue labels | `gh issue edit --add-label`, `--remove-label` (for locking) |
 
 **STOP and ask for:** Force push, direct main operations, deleting branches/worktrees not created this session, genuine ambiguity.
 
@@ -372,37 +372,22 @@ Follow TDD skill exactly for each acceptance criterion. Mark complete in progres
 
 If failures: see Error Recovery section.
 
-### 3e. CodeRabbit CLI Review (MANDATORY)
+### 3e. Pre-Commit Diff Check
 
-**ALWAYS run CodeRabbit CLI before pushing any PR.** This catches issues early and improves PR success rate.
+Review the working diff against the issue acceptance criteria and repository rules before committing. Fix findings and re-run affected verification. This does not replace the exact-head independent review.
 
-```bash
-(cd "$WORKTREE_DIR" && coderabbit --agent --type committed)
-```
+### 3f. Commit, Exact-Head Review, and Push
 
-**Flags:**
+Commit with conventional format: `<type>: <description>` with `Fixes #<number>` in the body. Record `git rev-parse HEAD`, then dispatch a reviewer who did not implement the change to review the complete base-to-HEAD diff. If no independent reviewer is available, stop and ask the user. Use at least two reviewers for high-risk or cross-cutting changes.
 
-- `--agent` — Token-efficient output optimized for Claude Code
-- `--type committed` — Reviews committed changes on current branch
-
-**If CodeRabbit suggests changes:**
-
-1. Address actionable suggestions in follow-up commits
-2. For suggestions that are out of scope, document why (e.g., "Out of scope: <reason>")
-3. Re-run CodeRabbit to verify fixes
-
-**Only proceed to push after:** CodeRabbit passes OR all suggestions are explicitly addressed/documented.
-
-### 3f. Commit and Push
-
-Commit with conventional format: `<type>: <description>` with `Fixes #<number>` in body. Push to origin with `-u` flag.
+Address findings in follow-up commits, re-run affected verification, and repeat review against the new HEAD. Push with `-u` only after the exact commit has a PASS verdict and every finding is resolved or explicitly rebutted.
 
 ### 3g. Create PR
 
-Use `gh pr create` with:
+Use `gh pr create --draft` with:
 
 - Title: `<type>: <description> (#<number>)`
-- Body: Summary bullets, files changed, test plan checklist, `Closes #<number>`
+- Body: Summary bullets, files changed, test plan checklist, review evidence (exact SHA, independent reviewer, verdict), and `Closes #<number>`
 
 ### 3h. Merge
 
@@ -412,7 +397,8 @@ Follow finishing skill for merge decision. Default for dev-issue is squash merge
 
 ```bash
 gh pr checks --watch
-gh pr merge --squash --delete-branch --auto
+# Stop and obtain explicit human approval for the reviewed SHA.
+gh pr merge --squash --delete-branch
 ```
 
 ### 3i. Cleanup

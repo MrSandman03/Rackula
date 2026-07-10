@@ -12,7 +12,11 @@
 // while prior-release / current bodies continue to load unchanged.
 import { describe, it, expect } from "vitest";
 import { parseLayoutObject } from "./yaml";
-import { createTestLayout } from "../../tests/factories";
+import {
+  createTestDeviceType,
+  createTestLayout,
+  createTestRack,
+} from "../../tests/factories";
 
 /** A schema-valid runtime body with a current-major schema_version header. */
 function currentVersionBody(): Record<string, unknown> {
@@ -53,6 +57,28 @@ describe("parseLayoutObject: forward-compat version gate (#2664)", () => {
     expect(result).not.toBeNull();
     expect(result?.name).toBe(layout.name);
   });
+
+  it("infers the RackMate profile from the exact legacy persisted tuple", () => {
+    const body = createTestLayout({
+      racks: [
+        createTestRack({
+          name: "RackMate T1 Plus",
+          width: 10,
+          height: 8,
+          depth_mm: 260,
+        }),
+      ],
+    });
+
+    const result = parseLayoutObject(body);
+
+    expect(result?.racks[0]).toMatchObject({
+      profile: "rackmate-t1-plus",
+      width: 10,
+      height: 8,
+      depth_mm: 260,
+    });
+  });
 });
 
 describe("parseLayoutObject: schema validation still rejects malformed bodies", () => {
@@ -64,5 +90,34 @@ describe("parseLayoutObject: schema validation still rejects malformed bodies", 
     };
     const result = parseLayoutObject(body);
     expect(result).toBeNull();
+  });
+
+  it("loads prior-release explicit multirow slot overflow losslessly", () => {
+    const container = {
+      ...createTestDeviceType({
+        slug: "legacy-overflow-container",
+        u_height: 2,
+        category: "chassis",
+      }),
+      slots: [
+        {
+          id: "bottom",
+          position: { row: 0, col: 0 },
+          width_fraction: 1,
+          height_units: 2,
+        },
+        {
+          id: "top",
+          position: { row: 1, col: 0 },
+          width_fraction: 1,
+          height_units: 1,
+        },
+      ],
+    };
+    const body = createTestLayout({ device_types: [container] });
+
+    const result = parseLayoutObject(body);
+
+    expect(result?.device_types[0]?.slots).toEqual(container.slots);
   });
 });

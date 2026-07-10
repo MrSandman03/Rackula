@@ -16,7 +16,11 @@ import {
   createTestDevice,
 } from "./factories";
 
-const oneU = createTestDeviceType({ slug: "switch", u_height: 1 });
+const oneU = createTestDeviceType({
+  slug: "switch",
+  u_height: 1,
+  is_full_depth: false,
+});
 const twoU = createTestDeviceType({
   slug: "server",
   u_height: 2,
@@ -68,6 +72,30 @@ describe("validStartPositions", () => {
   it("returns an empty list when the device cannot fit at all", () => {
     const rack = createTestRack({ height: 1, devices: [] });
     expect(validStartPositions(rack, [twoU], twoU, "front")).toEqual([]);
+  });
+
+  it("does not announce rail positions for a device deeper than the rack", () => {
+    const deepDevice = {
+      ...createTestDeviceType({
+        slug: "deep-device",
+        u_height: 1,
+        is_full_depth: false,
+      }),
+      custom_fields: {
+        rackula_fit: {
+          dimensions_mm: { width: 200, depth: 300, height: 40 },
+        },
+      },
+    };
+    const rack = createTestRack({
+      height: 5,
+      depth_mm: 260,
+      devices: [],
+    });
+
+    expect(
+      validStartPositions(rack, [deepDevice], deepDevice, "front"),
+    ).toEqual([]);
   });
 });
 

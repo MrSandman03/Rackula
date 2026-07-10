@@ -55,9 +55,8 @@
 
   let { ondeviceselect, oncreatedevice }: Props = $props();
 
-  // Estimated palette row height in pixels, used by the virtualized lists.
-  // Rows are a flex line with var(--touch-target-min) min-height (48px) plus
-  // vertical padding; 48 keeps the windowing math close enough for overscan.
+  // Fixed palette row height in pixels, shared with DevicePaletteItem's
+  // --touch-target-min block size. VirtualList requires exact row geometry.
   const ROW_HEIGHT = 48;
   // Below this row count a section renders as plain DOM so the accordion's
   // height animation and the generic section's category sub-grouping stay
@@ -304,6 +303,22 @@
     ...allGenericDevices,
     ...brandPacks.flatMap((pack) => pack.devices),
   ]);
+  const fitSummaryBySlug = $derived.by(() => {
+    const summaries: Record<string, ReturnType<typeof getRackFitSummary>> = {};
+
+    for (const device of allPaletteDevices) {
+      summaries[device.slug] = getRackFitSummary(
+        device,
+        activeRackWidth,
+        allPaletteDevices,
+        layoutStore.activeRack?.profile,
+        layoutStore.activeRack?.depth_mm,
+        layoutStore.activeRack?.height,
+      );
+    }
+
+    return summaries;
+  });
   const deviceCompatibilityBySlug = $derived.by(() => {
     const compatibility: Record<
       string,
@@ -311,15 +326,21 @@
     > = {};
 
     for (const device of allPaletteDevices) {
-      const compatible = isDeviceCompatibleWithRackWidth(
+      const widthCompatible = isDeviceCompatibleWithRackWidth(
         device,
         activeRackWidth,
       );
+      const blockedSummary =
+        fitSummaryBySlug[device.slug]?.tone === "blocked"
+          ? fitSummaryBySlug[device.slug]
+          : null;
+      const compatible = widthCompatible && !blockedSummary;
       compatibility[device.slug] = {
         isCompatible: compatible,
         incompatibilityReason: compatible
           ? null
-          : getRackWidthIncompatibilityReason(device, activeRackWidth),
+          : (blockedSummary?.title ??
+            getRackWidthIncompatibilityReason(device, activeRackWidth)),
       };
     }
 
@@ -338,20 +359,6 @@
     return requirements;
   });
 
-  const fitSummaryBySlug = $derived.by(() => {
-    const summaries: Record<string, ReturnType<typeof getRackFitSummary>> = {};
-
-    for (const device of allPaletteDevices) {
-      summaries[device.slug] = getRackFitSummary(
-        device,
-        activeRackWidth,
-        allPaletteDevices,
-      );
-    }
-
-    return summaries;
-  });
-
   const visibleGenericDevices = $derived(
     filterDevicesByAttributes(
       filterPaletteDevicesByRackWidth(
@@ -361,7 +368,7 @@
       ),
       attributeFilters,
       isCustomDevice,
-    ),
+    ).filter((device) => !uiStore.compatibleOnly || isCompatible(device)),
   );
   const filteredGenericDevices = $derived(
     searchDevices(visibleGenericDevices, searchQuery),
@@ -391,7 +398,7 @@
           isCustomDevice,
         ),
         searchQuery,
-      ),
+      ).filter((device) => !uiStore.compatibleOnly || isCompatible(device)),
     })),
   );
 
@@ -408,7 +415,7 @@
       ),
       attributeFilters,
       isCustomDevice,
-    ),
+    ).filter((device) => !uiStore.compatibleOnly || isCompatible(device)),
   );
   const filteredAllDevices = $derived(
     searchDevices(allDevicesCombined, searchQuery),
@@ -553,6 +560,7 @@
   });
 
   function handleDeviceSelect(event: CustomEvent<{ device: DeviceType }>) {
+    if (!isCompatible(event.detail.device)) return;
     ondeviceselect?.(event);
   }
 

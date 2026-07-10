@@ -149,8 +149,7 @@ export const RACK_DEPTH_PRESETS_MM: readonly number[] = [
 ] as const;
 
 /**
- * RackMate-specific depth preset. The 10-inch path in this fork is locked to
- * the user's 8U RackMate T1 Plus rather than generic mini-rack cabinets.
+ * RackMate-specific depth preset for racks with the explicit T1 Plus profile.
  */
 export const RACKMATE_DEPTH_PRESETS_MM: readonly number[] = [
   RACKMATE_T1_PLUS_DEPTH_MM,

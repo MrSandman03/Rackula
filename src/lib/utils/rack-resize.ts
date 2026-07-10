@@ -7,7 +7,15 @@
 
 import type { Rack, DeviceType, PlacedDevice } from "$lib/types";
 import { toHumanUnits } from "./position";
-import { MIN_RACK_HEIGHT } from "$lib/types/constants";
+import { MAX_RACK_HEIGHT, MIN_RACK_HEIGHT } from "$lib/types/constants";
+import { canPlaceDevice, canPlaceInContainer } from "./collision";
+import { findDeviceType } from "./device-lookup";
+import { isDeviceCompatibleWithRackWidth } from "./deviceFilters";
+import {
+  getDeviceDimensionsMm,
+  rackWidthToMillimetres,
+  SLOT_DIMENSION_TOLERANCE_MM,
+} from "./slot-fit";
 
 /**
  * Result of resize validation
@@ -25,6 +33,25 @@ export interface ResizeValidationResult {
 export interface ConflictInfo {
   device: PlacedDevice;
   deviceType: DeviceType | undefined;
+}
+
+export const RACK_HEIGHT_INPUT_ERROR = `Height must be a whole number between ${MIN_RACK_HEIGHT} and ${MAX_RACK_HEIGHT}U.`;
+
+/** Parse editor input without accepting partial integers such as `12.5`. */
+export function parseRackHeightInput(value: string): number | null {
+  if (value.trim() === "") return null;
+
+  const height = Number(value);
+  if (
+    !Number.isFinite(height) ||
+    !Number.isInteger(height) ||
+    height < MIN_RACK_HEIGHT ||
+    height > MAX_RACK_HEIGHT
+  ) {
+    return null;
+  }
+
+  return height;
 }
 
 /**
@@ -77,6 +104,104 @@ export function canResizeRackTo(
     allowed: conflicts.length === 0,
     conflicts,
   };
+}
+
+/**
+ * Validate a complete rack against proposed physical dimensions. This covers
+ * profile changes, where preserving only the current U positions is not enough:
+ * installed devices and contained assemblies must also fit the new width and
+ * depth.
+ */
+export function canFitRackDimensions(
+  rack: Rack,
+  dimensions: Pick<Rack, "width" | "height" | "depth_mm">,
+  deviceTypes: DeviceType[],
+): ResizeValidationResult {
+  const candidate: Rack = { ...rack, ...dimensions };
+  const resolvedTypes = new Map(deviceTypes.map((type) => [type.slug, type]));
+  const unresolved = new Set<string>();
+
+  for (const placed of rack.devices) {
+    if (resolvedTypes.has(placed.device_type)) continue;
+    const resolved = findDeviceType(placed.device_type, deviceTypes);
+    if (resolved) {
+      resolvedTypes.set(resolved.slug, resolved);
+    } else {
+      unresolved.add(placed.id);
+    }
+  }
+
+  const library = [...resolvedTypes.values()];
+  const rackWidthMm = rackWidthToMillimetres(candidate.width);
+  const conflicts: PlacedDevice[] = [];
+
+  for (let index = 0; index < rack.devices.length; index++) {
+    const placed = rack.devices[index]!;
+    const type = resolvedTypes.get(placed.device_type);
+    if (!type || unresolved.has(placed.id)) {
+      conflicts.push(placed);
+      continue;
+    }
+
+    const dimensionsMm = getDeviceDimensionsMm(type);
+    const incompatibleWidth =
+      !isDeviceCompatibleWithRackWidth(type, candidate.width) ||
+      (dimensionsMm?.width !== undefined &&
+        rackWidthMm !== undefined &&
+        dimensionsMm.width > rackWidthMm + SLOT_DIMENSION_TOLERANCE_MM);
+    const incompatibleDepth =
+      dimensionsMm?.depth !== undefined &&
+      candidate.depth_mm !== undefined &&
+      dimensionsMm.depth > candidate.depth_mm;
+
+    if (incompatibleWidth || incompatibleDepth) {
+      conflicts.push(placed);
+      continue;
+    }
+
+    if (placed.container_id) {
+      const parent = rack.devices.find(
+        (candidateDevice) => candidateDevice.id === placed.container_id,
+      );
+      const parentType = parent
+        ? resolvedTypes.get(parent.device_type)
+        : undefined;
+      if (
+        !parent ||
+        !parentType ||
+        !placed.slot_id ||
+        !canPlaceInContainer(
+          candidate,
+          library,
+          parent,
+          parentType,
+          type,
+          placed.slot_id,
+          placed.position,
+          placed.id,
+        )
+      ) {
+        conflicts.push(placed);
+      }
+      continue;
+    }
+
+    if (
+      !canPlaceDevice(
+        candidate,
+        library,
+        type.u_height,
+        placed.position,
+        index,
+        placed.face,
+        type,
+      )
+    ) {
+      conflicts.push(placed);
+    }
+  }
+
+  return { allowed: conflicts.length === 0, conflicts };
 }
 
 /**

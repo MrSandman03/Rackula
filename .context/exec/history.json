@@ -1,26 +1,26 @@
 [
   {
+    "session_id": "20260709-054449-rackmate-agentic-review",
+    "task": "End-to-end RackMate/Rackula bug, feature, QoL, and merge-gate pass",
+    "outcome": "success",
+    "steps_completed": 5,
+    "steps_total": 5,
+    "total_retries": 0,
+    "duration_minutes": 131,
+    "started_at": "2026-07-09T05:44:49Z",
+    "finished_at": "2026-07-09T07:55:36Z",
+    "notes": "Merged to fork main; the follow-up audit later found product and review-evidence defects."
+  },
+  {
     "session_id": "exec-20260709-080438-rackmate-fork-audit",
     "task": "Complete RackMate fork audit execution plan end to end",
-    "stage": "done",
-    "base_branch": "main",
-    "target_branch": "main",
-    "branch": "main",
-    "pr_url": "https://github.com/MrSandman03/Rackula/pull/1",
-    "merge_commit": "70724f4340d6845e763e8676f58c9bf1822eae55",
-    "completed_at": "2026-07-09T08:44:50Z",
-    "verification": [
-      "npm run check",
-      "npm run lint -- --quiet",
-      "npm run build",
-      "git diff --check",
-      "npm run test:run",
-      "npm run test:e2e:smoke",
-      "npm run test:e2e:rackmate"
-    ],
-    "warnings": [
-      "Vite/Playwright emitted the existing chunk-size warning.",
-      "Playwright web server emitted the existing NO_COLOR/FORCE_COLOR warning."
-    ]
+    "outcome": "success",
+    "steps_completed": 5,
+    "steps_total": 5,
+    "total_retries": 0,
+    "duration_minutes": 40,
+    "started_at": "2026-07-09T08:04:38Z",
+    "finished_at": "2026-07-09T08:44:50Z",
+    "notes": "Fork PR #1 merged as 70724f43 after local checks; a later cold review found product, coverage, and ledger defects tracked by exec-20260709-201348-rackmate-post-audit."
   }
 ]

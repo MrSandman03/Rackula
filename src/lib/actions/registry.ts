@@ -160,6 +160,12 @@ export interface ActionEnabledContext {
    */
   canMoveDeviceSlot: boolean;
   /**
+   * Whether the selected device is mounted inside a carrier. Carrier children
+   * can be deleted or moved between carrier cells, but rail-level actions must
+   * operate on the carrier assembly instead.
+   */
+  isContainerChildSelected?: boolean;
+  /**
    * Whether the layout is in read-only mode (presentation safety valve). When
    * true, all mutation verbs are disabled regardless of selection state. Omit
    * or set to false for normal edit mode.
@@ -286,7 +292,8 @@ export const ACTION_REGISTRY: ActionDefinition[] = [
     label: "Move device up",
     scope: "selection",
     bindings: [{ key: "ArrowUp" }],
-    enabledWhen: (ctx) => !ctx.readOnly && ctx.isDeviceSelected,
+    enabledWhen: (ctx) =>
+      !ctx.readOnly && ctx.isDeviceSelected && !ctx.isContainerChildSelected,
     helpGroup: "Editing",
     keywords: ["nudge", "up"],
   },
@@ -295,7 +302,8 @@ export const ACTION_REGISTRY: ActionDefinition[] = [
     label: "Move device down",
     scope: "selection",
     bindings: [{ key: "ArrowDown" }],
-    enabledWhen: (ctx) => !ctx.readOnly && ctx.isDeviceSelected,
+    enabledWhen: (ctx) =>
+      !ctx.readOnly && ctx.isDeviceSelected && !ctx.isContainerChildSelected,
     keywords: ["nudge", "down"],
   },
   {
@@ -315,7 +323,9 @@ export const ACTION_REGISTRY: ActionDefinition[] = [
       { key: "d", meta: true },
     ],
     enabledWhen: (ctx) =>
-      !ctx.readOnly && (ctx.isDeviceSelected || ctx.isRackSelected),
+      !ctx.readOnly &&
+      (ctx.isRackSelected ||
+        (ctx.isDeviceSelected && !ctx.isContainerChildSelected)),
     keywords: ["copy", "clone"],
   },
   {
@@ -323,7 +333,8 @@ export const ACTION_REGISTRY: ActionDefinition[] = [
     label: "Flip face",
     scope: "selection",
     bindings: [],
-    enabledWhen: (ctx) => !ctx.readOnly && ctx.isDeviceSelected,
+    enabledWhen: (ctx) =>
+      !ctx.readOnly && ctx.isDeviceSelected && !ctx.isContainerChildSelected,
     keywords: ["rotate", "front", "rear", "face"],
   },
   {

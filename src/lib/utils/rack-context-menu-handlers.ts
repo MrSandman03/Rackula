@@ -20,6 +20,7 @@ export interface ContextMenuHandlers {
     event: CustomEvent<{
       rackId: string;
       deviceIndex: number;
+      deviceId: string;
       x: number;
       y: number;
     }>,
@@ -30,6 +31,7 @@ export interface ContextMenuHandlers {
   handleMoveUp(rack: Rack, deviceLibrary: DeviceType[]): void;
   handleMoveDown(rack: Rack): void;
   handleFlip(rack: Rack): void;
+  handleMoveToNextSlot(): void;
   handleDelete(): void;
 }
 
@@ -78,6 +80,12 @@ export function createContextMenuHandlers(
       const { target } = getState();
       if (!target) return;
       actions.handleFlip(rack, target);
+      close();
+    },
+    handleMoveToNextSlot() {
+      const { target } = getState();
+      if (!target) return;
+      actions.handleMoveToNextSlot(target);
       close();
     },
     handleDelete() {
