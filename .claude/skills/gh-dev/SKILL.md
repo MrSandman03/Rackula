@@ -360,18 +360,6 @@ npm run build
 .worktree/<custom>-issue-<N>
 ```
 
-### Review Command
-
-Used by step 3d when `/code-review` is unavailable in the environment.
-
-````markdown
-### Review Command
-
-```bash
-<repo-specific local review command>
-```
-````
-
 ---
 
 ## Output Format

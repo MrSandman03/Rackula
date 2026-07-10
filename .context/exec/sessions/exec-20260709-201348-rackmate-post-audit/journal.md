@@ -74,3 +74,13 @@
 - Posted explicit request `https://github.com/MrSandman03/Rackula/pull/2#issuecomment-4933153413`; no bot acknowledgement or review followed.
 - Recorded CodeRabbit availability as an external merge blocker. The PR remains draft and unmerged.
 - Local dev server is available at `http://127.0.0.1:4173/`; the in-app browser backend was unavailable, while local and hosted Playwright gates passed.
+
+## 2026-07-10T08:33:29Z - Inherited external review integration removed
+
+- The owner explicitly rejected the external AI review service inherited from upstream Rackula. It had entered upstream through configuration commit `094ccb5d`, the pre-push hook commit `223e7bfd`, and later gate changes in `53e2690e`; it was not introduced by the RackMate work.
+- No GitHub App authorization completed. Removed the temporary unauthenticated CLI binary, generated local state, global Git configuration entry, and the unanswered PR trigger comment.
+- Commit `6e44acc8` deleted the active repository configuration, Husky pre-push hook, gate script, and gate tests, then replaced current workflow guidance with exact-head independent review and explicit human approval.
+- The first independent review cycle found contradictory unattended dependency merging, review-before-commit ordering, missing generated PR evidence, stale fork CI guidance, and overbroad optional-review wording.
+- Commit `593b63b5` resolved those findings by removing Dependabot auto-merge, aligning all active PR-producing commands, documenting hosted fork CI, and marking optional Claude review as non-gating.
+- The second review cycle returned one PASS and one minor documentation finding. The stale review-command extension point was removed in the ledger closure commit.
+- The obsolete external-service blocker is cleared. PR #2 remains draft and unmerged; the main target lock stays held pending fresh checks and explicit human approval.

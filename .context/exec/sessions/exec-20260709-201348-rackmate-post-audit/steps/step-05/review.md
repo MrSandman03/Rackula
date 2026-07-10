@@ -1,6 +1,6 @@
 # Step 5 Final Review
 
-Reviewed commit: `8ec08780cea2caaae21041aa0de159c5b82d1ea8`
+Product code reviewed commit: `8ec08780cea2caaae21041aa0de159c5b82d1ea8`
 
 Verdict: PASS
 
@@ -13,4 +13,13 @@ Verdict: PASS
 
 No unresolved critical or major findings remain. Files already above 1,000 lines at base are inherited debt and were not expanded into this repair.
 
-All GitHub Actions checks passed on PR head `27fdb43e`. CodeRabbit did not appear on the fork review surface and did not respond to an explicit `@coderabbitai review` request, so repository policy still blocks merge despite the independent PASS verdicts above.
+All GitHub Actions checks passed through PR head `e74ee9ae` before the fork review-policy correction.
+
+## Fork Review Policy Correction
+
+- The owner explicitly rejected the inherited external review service.
+- Commit `6e44acc86ad72baf7dd60a0e85667c088c2dec70` removed its repository configuration, pre-push hook, gate implementation, tests, and active workflow instructions.
+- Commit `593b63b55b919d1f14f9c901abdbb4bec6867e68` removed unattended dependency merges and aligned every active PR path with commit-before-review, exact-SHA evidence, applicable hosted CI, and explicit human approval.
+- Two independent reviewers audited the policy head. One returned PASS; the other found one minor stale extension point, removed in the ledger closure commit.
+
+The external-service blocker is cleared. PR #2 remains draft and unmerged; fresh hosted checks and explicit human merge approval are still required.

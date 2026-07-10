@@ -40,11 +40,9 @@
       "target_branch": "main",
       "branch": "fix/rackmate-post-audit",
       "worktree": "/Users/gavin/projects/p-rackula-minirack-worktrees/rackmate-post-audit",
-      "blockers": [
-        "CodeRabbit did not respond on fork PR #2; repository policy requires its approval before merge."
-      ],
-      "last_event": "All PR checks passed; CodeRabbit remains unavailable on the fork and blocks merge.",
-      "last_updated": "2026-07-10T07:50:11Z"
+      "blockers": [],
+      "last_event": "Owner removed the inherited external review integration and adopted exact-head independent review plus explicit human merge approval; PR #2 remains draft.",
+      "last_updated": "2026-07-10T08:33:29Z"
     }
   },
   "target_locks": {
@@ -53,9 +51,9 @@
       "stage": "pr_open",
       "branch": "fix/rackmate-post-audit",
       "since": "2026-07-10T06:00:46Z",
-      "last_updated": "2026-07-10T06:00:46Z"
+      "last_updated": "2026-07-10T08:33:29Z"
     }
   },
-  "last_updated": "2026-07-10T07:50:11Z",
-  "last_event": "All PR checks passed; CodeRabbit remains unavailable on the fork and blocks merge."
+  "last_updated": "2026-07-10T08:33:29Z",
+  "last_event": "Owner removed the inherited external review integration and adopted exact-head independent review plus explicit human merge approval; PR #2 remains draft."
 }
